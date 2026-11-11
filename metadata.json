@@ -1,0 +1,6 @@
+{
+  "name": "CardápioPro Canção Nova - Gestão & Montagem Semanal",
+  "description": "Sistema de montagem e planejamento de cardápios semanais e mensais com detector inteligente de pratos repetidos entre semanas e controle de acesso institucional restrito a @cancaonova.com.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
