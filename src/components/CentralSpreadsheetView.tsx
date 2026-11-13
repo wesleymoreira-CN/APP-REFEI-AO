@@ -34,6 +34,7 @@ import {
   sheetToCsv 
 } from '../utils/spreadsheetEngine';
 import { getNextExpiringOrder } from '../utils/orderRetention';
+import { buildDailyOrderProductionSummaries } from '../utils/dailyOrderCalculations';
 import { GoogleSheetsDatabaseModal } from './GoogleSheetsDatabaseModal';
 
 export const CentralSpreadsheetView: React.FC = () => {
@@ -119,6 +120,7 @@ export const CentralSpreadsheetView: React.FC = () => {
 
   const [copied, setCopied] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
+  const [selectedCalcDay, setSelectedCalcDay] = useState<string>('all');
   const [appsScriptModalOpen, setAppsScriptModalOpen] = useState(false);
   const [syncToast, setSyncToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -192,6 +194,68 @@ export const CentralSpreadsheetView: React.FC = () => {
     () => getNextExpiringOrder(clientOrders),
     [clientOrders]
   );
+
+  const dailyProductionSummaries = React.useMemo(
+    () => buildDailyOrderProductionSummaries(clientOrders),
+    [clientOrders]
+  );
+
+  const filteredDailyDishItems = React.useMemo(() => {
+    const targetDays =
+      selectedCalcDay === 'all'
+        ? dailyProductionSummaries
+        : dailyProductionSummaries.filter((d) => d.serviceDate === selectedCalcDay);
+    return targetDays.flatMap((d) => d.items);
+  }, [dailyProductionSummaries, selectedCalcDay]);
+
+  const userSummaryTotals = React.useMemo(() => {
+    return userOrderSummaries.reduce(
+      (acc, u) => ({
+        orderCount: acc.orderCount + u.orderCount,
+        totalArroz: acc.totalArroz + u.totalArroz,
+        totalFeijao: acc.totalFeijao + u.totalFeijao,
+        totalPrincipal: acc.totalPrincipal + u.totalPrincipal,
+        totalGuarnicao: acc.totalGuarnicao + u.totalGuarnicao,
+        totalSalada: acc.totalSalada + u.totalSalada,
+        totalSobremesa: acc.totalSobremesa + u.totalSobremesa,
+        totalMaxPax: acc.totalMaxPax + u.totalMaxPax,
+      }),
+      {
+        orderCount: 0,
+        totalArroz: 0,
+        totalFeijao: 0,
+        totalPrincipal: 0,
+        totalGuarnicao: 0,
+        totalSalada: 0,
+        totalSobremesa: 0,
+        totalMaxPax: 0,
+      }
+    );
+  }, [userOrderSummaries]);
+
+  const filteredPedidoColumnTotals = React.useMemo(() => {
+    const initialTotals = {
+      Arroz_Pessoas: 0,
+      Feijao_Pessoas: 0,
+      Principal_Pessoas: 0,
+      Guarnicao_Pessoas: 0,
+      Salada_Pessoas: 0,
+      Sobremesa_Pessoas: 0,
+      Total_Comensais_Max: 0,
+    };
+    return filteredPedidoRows.reduce<typeof initialTotals>(
+      (acc, r) => ({
+        Arroz_Pessoas: acc.Arroz_Pessoas + (Number(r.Arroz_Pessoas) || 0),
+        Feijao_Pessoas: acc.Feijao_Pessoas + (Number(r.Feijao_Pessoas) || 0),
+        Principal_Pessoas: acc.Principal_Pessoas + (Number(r.Principal_Pessoas) || 0),
+        Guarnicao_Pessoas: acc.Guarnicao_Pessoas + (Number(r.Guarnicao_Pessoas) || 0),
+        Salada_Pessoas: acc.Salada_Pessoas + (Number(r.Salada_Pessoas) || 0),
+        Sobremesa_Pessoas: acc.Sobremesa_Pessoas + (Number(r.Sobremesa_Pessoas) || 0),
+        Total_Comensais_Max: acc.Total_Comensais_Max + (Number(r.Total_Comensais_Max) || 0),
+      }),
+      initialTotals
+    );
+  }, [filteredPedidoRows]);
 
   const dayKeys = ['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'] as const;
 
@@ -1315,7 +1379,334 @@ export const CentralSpreadsheetView: React.FC = () => {
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="bg-emerald-50 dark:bg-emerald-950/50 border-t-2 border-emerald-400 dark:border-emerald-700 font-black text-neutral-900 dark:text-neutral-100 font-mono">
+                    <td colSpan={2} className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 font-sans uppercase tracking-wider text-[11px] text-emerald-900 dark:text-emerald-200">
+                      Somatória Geral (Todos os Usuários)
+                    </td>
+                    <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center text-amber-700 dark:text-amber-300">
+                      {userSummaryTotals.orderCount}
+                    </td>
+                    <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center">
+                      {userSummaryTotals.totalArroz} pax
+                    </td>
+                    <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center">
+                      {userSummaryTotals.totalFeijao} pax
+                    </td>
+                    <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center text-rose-700 dark:text-rose-300">
+                      {userSummaryTotals.totalPrincipal} pax
+                    </td>
+                    <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center">
+                      {userSummaryTotals.totalGuarnicao} pax
+                    </td>
+                    <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center text-emerald-700 dark:text-emerald-300">
+                      {userSummaryTotals.totalSalada} pax
+                    </td>
+                    <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center text-purple-700 dark:text-purple-300">
+                      {userSummaryTotals.totalSobremesa} pax
+                    </td>
+                    <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center bg-emerald-100 dark:bg-emerald-900/60 text-emerald-950 dark:text-emerald-100">
+                      {userSummaryTotals.totalMaxPax} pax
+                    </td>
+                    <td className="px-3 py-2.5 font-sans text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                      Soma total p/ conferência
+                    </td>
+                  </tr>
+                </tfoot>
               </table>
+            </div>
+          </div>
+
+          {/* ========================================================================= */}
+          {/* SOMATÓRIA DIÁRIA POR DIA & POR PRATO / ALIMENTO (CÁLCULO DA COZINHA)       */}
+          {/* ========================================================================= */}
+          <div className="bg-white dark:bg-neutral-900 border border-emerald-300 dark:border-emerald-800/80 rounded-2xl shadow-sm overflow-hidden">
+            <div className="bg-emerald-700 text-white px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-bold">
+              <div className="flex items-center gap-2">
+                <Scale className="w-4 h-4 text-emerald-200" />
+                <div>
+                  <span className="text-sm font-black block">
+                    Cálculo Diário para Fazer a Comida — Somatória de Pessoas & Alimentos por Dia
+                  </span>
+                  <span className="text-[11px] text-emerald-100/90 font-normal">
+                    Agrupa automaticamente todos os pedidos por dia e soma pessoas + peso estimado (kg/porções) de cada prato e alimento.
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const ok = await copySheetToClipboard('calculoDiario');
+                    if (ok) {
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2500);
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-white/15 hover:bg-white/25 text-white rounded-xl text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copiar Cálculo Diário</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => exportSpreadsheetCsv('calculoDiario')}
+                  className="px-3 py-1.5 bg-emerald-900/60 hover:bg-emerald-900 text-white rounded-xl text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>CSV Diário</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Sub-Table 1: Daily Totals by Date (Pax & Category Totals per Day) */}
+            <div className="p-4 space-y-4">
+              <div>
+                <h5 className="text-xs font-bold text-neutral-800 dark:text-neutral-200 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>1. Resumo Total de Pessoas (PAX) e Categorias por Dia</span>
+                </h5>
+                <div className="overflow-x-auto scrollbar-thin border border-neutral-200 dark:border-neutral-800 rounded-xl">
+                  <table className="w-full text-xs text-left border-collapse">
+                    <thead>
+                      <tr className="bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 font-bold border-b border-neutral-200 dark:border-neutral-700">
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700">Data Refeição</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700">Dia da Semana</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-center">Pedidos</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-center">🍚 Arroz</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-center">🫘 Feijão</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-center">🥩 Principal</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-center">🥔 Guarnição</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-center">🥬 Salada</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-center">🍮 Sobremesa</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-center bg-emerald-50 dark:bg-emerald-950/40">Total Pessoas (Dia)</th>
+                        <th className="px-3 py-2">🍎 Frutas Somadas no Dia</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
+                      {dailyProductionSummaries.length === 0 ? (
+                        <tr>
+                          <td colSpan={11} className="py-6 text-center text-neutral-400 italic">
+                            Nenhum pedido registrado para cálculo diário.
+                          </td>
+                        </tr>
+                      ) : (
+                        dailyProductionSummaries.map((day) => (
+                          <tr
+                            key={day.serviceDate}
+                            onClick={() => setSelectedCalcDay(day.serviceDate)}
+                            className={`cursor-pointer transition-colors ${
+                              selectedCalcDay === day.serviceDate
+                                ? 'bg-emerald-50/70 dark:bg-emerald-950/30'
+                                : 'hover:bg-neutral-50 dark:hover:bg-neutral-800/40'
+                            }`}
+                          >
+                            <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 font-mono font-bold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
+                              {day.serviceDate}
+                            </td>
+                            <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 font-bold text-neutral-900 dark:text-neutral-100 whitespace-nowrap">
+                              {day.dayName}
+                            </td>
+                            <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono font-bold text-amber-700 dark:text-amber-400">
+                              {day.ordersCount}
+                            </td>
+                            <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono">
+                              <div className="font-bold">{day.totalArrozPax} pax</div>
+                              <div className="text-[10px] text-neutral-500">{(Math.round(day.totalArrozPax * 0.09 * 100) / 100)} kg</div>
+                            </td>
+                            <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono">
+                              <div className="font-bold">{day.totalFeijaoPax} pax</div>
+                              <div className="text-[10px] text-neutral-500">{(Math.round(day.totalFeijaoPax * 0.07 * 100) / 100)} kg</div>
+                            </td>
+                            <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono">
+                              <div className="font-bold text-rose-700 dark:text-rose-400">{day.totalPrincipalPax} pax</div>
+                              <div className="text-[10px] text-neutral-500">{(Math.round(day.totalPrincipalPax * 0.14 * 100) / 100)} kg</div>
+                            </td>
+                            <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono">
+                              <div className="font-bold">{day.totalGuarnicaoPax} pax</div>
+                              <div className="text-[10px] text-neutral-500">{(Math.round(day.totalGuarnicaoPax * 0.09 * 100) / 100)} kg</div>
+                            </td>
+                            <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono">
+                              <div className="font-bold text-emerald-700 dark:text-emerald-400">{day.totalSaladaPax} pax</div>
+                              <div className="text-[10px] text-neutral-500">{(Math.round(day.totalSaladaPax * 0.06 * 100) / 100)} kg</div>
+                            </td>
+                            <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono font-bold text-purple-700 dark:text-purple-400">
+                              {day.totalSobremesaPax} porç.
+                            </td>
+                            <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono font-black text-emerald-900 dark:text-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20">
+                              {day.totalMaxPax} pax
+                            </td>
+                            <td className="px-3 py-2.5">
+                              {day.fruitsBreakdown.length > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {day.fruitsBreakdown.map((fr, fIdx) => (
+                                    <span key={fIdx} className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-[10px] font-mono font-bold text-amber-900 dark:text-amber-200">
+                                      {fr.name}: {fr.quantity} {fr.unit}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-neutral-400 italic">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                    {dailyProductionSummaries.length > 0 && (
+                      <tfoot>
+                        <tr className="bg-emerald-50 dark:bg-emerald-950/50 border-t-2 border-emerald-400 dark:border-emerald-700 font-black font-mono text-neutral-900 dark:text-neutral-100">
+                          <td colSpan={2} className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 font-sans uppercase text-[11px] text-emerald-900 dark:text-emerald-200">
+                            Somatória Geral (Todos os Dias)
+                          </td>
+                          <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center text-amber-700 dark:text-amber-300">
+                            {dailyProductionSummaries.reduce((s, d) => s + d.ordersCount, 0)}
+                          </td>
+                          <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center">
+                            {dailyProductionSummaries.reduce((s, d) => s + d.totalArrozPax, 0)} pax
+                          </td>
+                          <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center">
+                            {dailyProductionSummaries.reduce((s, d) => s + d.totalFeijaoPax, 0)} pax
+                          </td>
+                          <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center text-rose-700 dark:text-rose-300">
+                            {dailyProductionSummaries.reduce((s, d) => s + d.totalPrincipalPax, 0)} pax
+                          </td>
+                          <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center">
+                            {dailyProductionSummaries.reduce((s, d) => s + d.totalGuarnicaoPax, 0)} pax
+                          </td>
+                          <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center text-emerald-700 dark:text-emerald-300">
+                            {dailyProductionSummaries.reduce((s, d) => s + d.totalSaladaPax, 0)} pax
+                          </td>
+                          <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center text-purple-700 dark:text-purple-300">
+                            {dailyProductionSummaries.reduce((s, d) => s + d.totalSobremesaPax, 0)} porç.
+                          </td>
+                          <td className="px-3 py-2.5 border-r border-emerald-200 dark:border-emerald-800 text-center bg-emerald-100 dark:bg-emerald-900/60">
+                            {dailyProductionSummaries.reduce((s, d) => s + d.totalMaxPax, 0)} pax
+                          </td>
+                          <td className="px-3 py-2.5 font-sans text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                            Clique em um dia p/ detalhar
+                          </td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              </div>
+
+              {/* Sub-Table 2: Each Dish & Food Item Separately Per Day */}
+              <div>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                  <h5 className="text-xs font-bold text-neutral-800 dark:text-neutral-200 uppercase tracking-wider flex items-center gap-1.5">
+                    <Utensils className="w-3.5 h-3.5 text-amber-600" />
+                    <span>2. Cada Prato e Alimento Separadamente por Dia (O que Preparar na Cozinha)</span>
+                  </h5>
+
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCalcDay('all')}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-colors ${
+                        selectedCalcDay === 'all'
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200'
+                      }`}
+                    >
+                      Todos os Dias ({dailyProductionSummaries.length})
+                    </button>
+                    {dailyProductionSummaries.map((d) => (
+                      <button
+                        key={d.serviceDate}
+                        type="button"
+                        onClick={() => setSelectedCalcDay(d.serviceDate)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold font-mono cursor-pointer transition-colors ${
+                          selectedCalcDay === d.serviceDate
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200'
+                        }`}
+                      >
+                        {d.serviceDate} ({d.dayName.split('-')[0]})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto scrollbar-thin border border-neutral-200 dark:border-neutral-800 rounded-xl max-h-[420px]">
+                  <table className="w-full text-xs text-left border-collapse">
+                    <thead className="sticky top-0 z-10 bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 font-bold border-b border-neutral-200 dark:border-neutral-700">
+                      <tr>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700">Data Refeição</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700">Dia</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700">Categoria</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700">Prato / Alimento Separado</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-center">Pedidos</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-right">Somatória de Pessoas</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-center">Base Per Capita</th>
+                        <th className="px-3 py-2 text-right bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200">Qtd. Total p/ Fazer</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
+                      {filteredDailyDishItems.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="py-6 text-center text-neutral-400 italic">
+                            Nenhum prato ou alimento encontrado para o dia selecionado.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredDailyDishItems.map((item, idx) => (
+                          <tr key={`${item.serviceDate}-${item.category}-${item.dishName}-${idx}`} className="hover:bg-neutral-50 dark:hover:bg-neutral-800/40">
+                            <td className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 font-mono font-bold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
+                              {item.serviceDate}
+                            </td>
+                            <td className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 whitespace-nowrap">
+                              {item.dayName}
+                            </td>
+                            <td className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 whitespace-nowrap">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 font-semibold text-neutral-800 dark:text-neutral-200">
+                                <span>{item.icon}</span>
+                                <span>{item.categoryLabel}</span>
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 font-bold text-neutral-900 dark:text-neutral-100">
+                              {item.dishName}
+                            </td>
+                            <td className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono font-bold text-amber-700 dark:text-amber-400">
+                              {item.ordersCount}
+                            </td>
+                            <td className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-right font-mono font-bold text-neutral-900 dark:text-neutral-100 whitespace-nowrap">
+                              {item.totalPeople} pessoas
+                            </td>
+                            <td className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-center text-[11px] text-neutral-500 font-mono whitespace-nowrap">
+                              {item.perCapitaLabel}
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono font-black text-emerald-800 dark:text-emerald-300 bg-emerald-50/40 dark:bg-emerald-950/20 whitespace-nowrap">
+                              {item.estimatedAmount} {item.estimatedUnit}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                    {filteredDailyDishItems.length > 0 && (
+                      <tfoot>
+                        <tr className="bg-emerald-50 dark:bg-emerald-950/50 border-t-2 border-emerald-400 dark:border-emerald-700 font-black text-neutral-900 dark:text-neutral-100 font-mono">
+                          <td colSpan={4} className="px-3 py-2 border-r border-emerald-200 dark:border-emerald-800 font-sans uppercase text-[11px] text-emerald-900 dark:text-emerald-200">
+                            Somatória dos Pratos & Alimentos Exibidos ({filteredDailyDishItems.length} itens)
+                          </td>
+                          <td className="px-3 py-2 border-r border-emerald-200 dark:border-emerald-800 text-center text-amber-700 dark:text-amber-300">
+                            {filteredDailyDishItems.reduce((acc, it) => acc + it.ordersCount, 0)}
+                          </td>
+                          <td className="px-3 py-2 border-r border-emerald-200 dark:border-emerald-800 text-right whitespace-nowrap">
+                            {filteredDailyDishItems.reduce((acc, it) => acc + it.totalPeople, 0)} porções/pax
+                          </td>
+                          <td colSpan={2} className="px-3 py-2 text-right font-sans text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
+                            {Math.round(filteredDailyDishItems.filter((i) => i.estimatedUnit === 'kg').reduce((acc, it) => acc + it.estimatedAmount, 0) * 100) / 100} kg em pratos +{' '}
+                            {filteredDailyDishItems.filter((i) => i.estimatedUnit !== 'kg').reduce((acc, it) => acc + it.estimatedAmount, 0)} un/porções
+                          </td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1429,6 +1820,41 @@ export const CentralSpreadsheetView: React.FC = () => {
                     })
                   )}
                 </tbody>
+                {filteredPedidoRows.length > 0 && spreadsheet.sheets.pedidos?.columns && (
+                  <tfoot className="sticky bottom-0 z-10">
+                    <tr className="bg-amber-50 dark:bg-amber-950/60 border-t-2 border-amber-400 dark:border-amber-700 font-black font-mono text-neutral-900 dark:text-neutral-100">
+                      {spreadsheet.sheets.pedidos.columns.map((col, cIdx) => {
+                        if (cIdx === 0) {
+                          return (
+                            <td key={col.key} className="px-3 py-2.5 border-r border-amber-200 dark:border-amber-800 font-sans text-[10px] uppercase text-amber-900 dark:text-amber-200">
+                              SOMA
+                            </td>
+                          );
+                        }
+                        if (cIdx === 1) {
+                          return (
+                            <td key={col.key} className="px-3 py-2.5 border-r border-amber-200 dark:border-amber-800 font-sans text-[11px] font-bold text-amber-900 dark:text-amber-200 whitespace-nowrap">
+                              {filteredPedidoRows.length} pedidos
+                            </td>
+                          );
+                        }
+                        if (col.key in filteredPedidoColumnTotals) {
+                          const totalVal = filteredPedidoColumnTotals[col.key as keyof typeof filteredPedidoColumnTotals];
+                          return (
+                            <td key={col.key} className="px-3 py-2.5 border-r border-amber-200 dark:border-amber-800 whitespace-nowrap text-right text-amber-950 dark:text-amber-100">
+                              {totalVal} pax
+                            </td>
+                          );
+                        }
+                        return (
+                          <td key={col.key} className="px-3 py-2.5 border-r border-amber-200 dark:border-amber-800 last:border-r-0">
+                            —
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
 

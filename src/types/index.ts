@@ -206,6 +206,7 @@ export interface SystemSpreadsheet {
     usuarios: SpreadsheetSheet;
     auditoria: SpreadsheetSheet;
     pedidos: SpreadsheetSheet;
+    calculoDiario: SpreadsheetSheet;
   };
 }
 

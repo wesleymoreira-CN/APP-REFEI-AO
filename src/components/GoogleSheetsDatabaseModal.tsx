@@ -307,10 +307,11 @@ export const GoogleSheetsDatabaseModal: React.FC<GoogleSheetsDatabaseModalProps>
                   </button>
                 </div>
                 <p className="text-neutral-700 dark:text-neutral-300 leading-relaxed">
-                  Ao conectar a URL do seu <strong>Google Apps Script Web App</strong>, sua planilha no Google Drive passa a atuar como banco de dados completo com 5 abas criadas automaticamente:{' '}
+                  Ao conectar a URL do seu <strong>Google Apps Script Web App</strong>, sua planilha no Google Drive passa a atuar como banco de dados completo com 6 abas criadas automaticamente:{' '}
                   <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">Usuarios</span>,{' '}
                   <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">Pedidos_Rampa</span> (com coluna{' '}
                   <span className="font-mono font-bold text-amber-700 dark:text-amber-300">Expiracao_8_Dias</span>),{' '}
+                  <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">Calculo_Diario_Cozinha</span>,{' '}
                   <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">Cardapio_Semanal</span>,{' '}
                   <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">Producao_Cozinha</span> e{' '}
                   <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">Auditoria</span>.

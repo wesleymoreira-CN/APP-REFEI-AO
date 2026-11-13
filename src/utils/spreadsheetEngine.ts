@@ -1,6 +1,7 @@
 import { WeeklyMenu, User, Dish, SystemSpreadsheet, SpreadsheetSheet, SpreadsheetRow, AuditLogEntry, ClientRampaOrder } from '../types';
 import { CATEGORY_LABELS } from './validators';
 import { getOrderRetentionInfo } from './orderRetention';
+import { buildDailyOrderProductionSummaries } from './dailyOrderCalculations';
 
 const DEFAULT_PAX_RAMPA = 400;
 const DEFAULT_PAX_KILO = 250;
@@ -422,6 +423,50 @@ export function buildSystemSpreadsheet(
     lastUpdated: now,
   };
 
+  // 8. Sheet: Cálculo Diário de Produção por Prato/Alimento (baseado nos Pedidos)
+  const dailySummaries = buildDailyOrderProductionSummaries(clientOrders);
+  const calculoDiarioRows: SpreadsheetRow[] = [];
+  let calcRowId = 1;
+
+  dailySummaries.forEach((daySum) => {
+    daySum.items.forEach((item) => {
+      calculoDiarioRows.push({
+        Linha: calcRowId++,
+        Data_Refeicao: item.serviceDate,
+        Dia_Semana: item.dayName,
+        Categoria: item.categoryLabel,
+        Prato_Alimento: item.dishName,
+        Qtd_Pedidos: item.ordersCount,
+        Total_Pessoas_PAX: item.totalPeople,
+        Qtd_Preparar_Cozinha: item.estimatedAmount,
+        Unidade: item.estimatedUnit,
+        Base_Per_Capita: item.perCapitaLabel,
+      });
+    });
+  });
+
+  const calculoDiarioSheet: SpreadsheetSheet = {
+    id: 'calculoDiario',
+    name: 'Calculo_Diario_Cozinha',
+    title: 'Somatória Diária de Pessoas, Pratos e Alimentos Separados por Dia',
+    description: 'Cálculo consolidado por dia e por prato/alimento individual somando todas as solicitações para auxiliar o preparo diário na cozinha.',
+    columns: [
+      { key: 'Linha', label: '#', width: '50px', type: 'number' },
+      { key: 'Data_Refeicao', label: 'Data', width: '110px', type: 'date' },
+      { key: 'Dia_Semana', label: 'Dia da Semana', width: '130px', type: 'text' },
+      { key: 'Categoria', label: 'Categoria', width: '150px', type: 'tag' },
+      { key: 'Prato_Alimento', label: 'Prato / Alimento', width: '240px', type: 'text' },
+      { key: 'Qtd_Pedidos', label: 'Pedidos', width: '80px', type: 'number' },
+      { key: 'Total_Pessoas_PAX', label: 'Total Pessoas (PAX)', width: '140px', type: 'number' },
+      { key: 'Qtd_Preparar_Cozinha', label: 'Qtd. p/ Fazer', width: '120px', type: 'number' },
+      { key: 'Unidade', label: 'Unid.', width: '80px', type: 'tag' },
+      { key: 'Base_Per_Capita', label: 'Per Capita', width: '140px', type: 'text' },
+    ],
+    rows: calculoDiarioRows,
+    totalRows: calculoDiarioRows.length,
+    lastUpdated: now,
+  };
+
   const totalRecords =
     cardapiosRows.length +
     producaoRows.length +
@@ -429,7 +474,8 @@ export function buildSystemSpreadsheet(
     pratosRows.length +
     usuariosRows.length +
     auditoriaRows.length +
-    pedidosRows.length;
+    pedidosRows.length +
+    calculoDiarioRows.length;
 
   return {
     title: 'Planilha Central CardápioPro Canção Nova (Database Integrado)',
@@ -440,6 +486,7 @@ export function buildSystemSpreadsheet(
       cardapios: cardapiosSheet,
       producao: producaoSheet,
       pedidos: pedidosSheet,
+      calculoDiario: calculoDiarioSheet,
       amostras: amostrasSheet,
       pratos: pratosSheet,
       usuarios: usuariosSheet,

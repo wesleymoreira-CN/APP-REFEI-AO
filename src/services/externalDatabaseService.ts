@@ -302,6 +302,7 @@ export function generateGoogleAppsScriptCode(): string {
   return `var SHEET_NAMES = {
   USUARIOS: 'Usuarios',
   PEDIDOS: 'Pedidos_Rampa',
+  CALCULO_DIARIO: 'Calculo_Diario_Cozinha',
   CARDAPIO: 'Cardapio_Semanal',
   PRODUCAO: 'Producao_Cozinha',
   AUDITORIA: 'Auditoria'
@@ -319,6 +320,11 @@ var HEADERS = {
     'Arroz_Pessoas', 'Feijao_Pessoas', 'Prato_Principal_Pessoas',
     'Guarnicao_Pessoas', 'Salada_Pessoas', 'Frutas_Solicitadas',
     'Observacoes', 'Status'
+  ],
+  Calculo_Diario_Cozinha: [
+    'Data_Refeicao', 'Dia_Semana', 'Categoria', 'Prato_Alimento',
+    'Qtd_Pedidos', 'Total_Pessoas_PAX', 'Qtd_Preparar_Cozinha',
+    'Unidade', 'Base_Per_Capita'
   ],
   Cardapio_Semanal: [
     'Ano', 'Mes', 'Semana', 'Periodo', 'Tipo_Cardapio',
@@ -560,6 +566,9 @@ function doPost(e) {
           return !isPedidoExpirado8Dias_(refDate);
         });
         counts.orders = replaceTableRows_(ss.getSheetByName(SHEET_NAMES.PEDIDOS), HEADERS.Pedidos_Rampa, activeOrdersOnly.map(formatOrderRow_));
+      }
+      if (Array.isArray(body.dailyCalcRows)) {
+        counts.dailyCalcRows = replaceTableRows_(ss.getSheetByName(SHEET_NAMES.CALCULO_DIARIO), HEADERS.Calculo_Diario_Cozinha, body.dailyCalcRows);
       }
       if (Array.isArray(body.menuRows)) {
         counts.menuRows = replaceTableRows_(ss.getSheetByName(SHEET_NAMES.CARDAPIO), HEADERS.Cardapio_Semanal, body.menuRows);
@@ -1113,11 +1122,24 @@ export async function pushFullSyncToAppsScript(
     r.Detalhes ?? '',
   ]);
 
+  const dailyCalcRows = (payload.spreadsheet.sheets.calculoDiario?.rows || []).map((r) => [
+    r.Data_Refeicao ?? '',
+    r.Dia_Semana ?? '',
+    r.Categoria ?? '',
+    r.Prato_Alimento ?? '',
+    r.Qtd_Pedidos ?? 0,
+    r.Total_Pessoas_PAX ?? 0,
+    r.Qtd_Preparar_Cozinha ?? 0,
+    r.Unidade ?? '',
+    r.Base_Per_Capita ?? '',
+  ]);
+
   try {
     const proxyResult = await proxyGoogleRequest(clean, 'POST', {
       action: 'syncAll',
       users: payload.users,
       orders: payload.orders,
+      dailyCalcRows,
       menuRows,
       productionRows,
       auditRows,
