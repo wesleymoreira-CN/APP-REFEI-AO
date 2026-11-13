@@ -23,7 +23,8 @@ import {
   Edit2,
   X,
   Package,
-  Apple
+  Apple,
+  CheckCircle2
 } from 'lucide-react';
 import { MealSlot, MenuType } from '../types';
 import { MONTH_NAMES } from '../utils/validators';
@@ -1460,7 +1461,97 @@ export const CentralSpreadsheetView: React.FC = () => {
             </div>
 
             {/* Sub-Table 1: Daily Totals by Date (Pax & Category Totals per Day) */}
-            <div className="p-4 space-y-4">
+            <div className="p-4 space-y-5">
+              {/* Direct Kitchen Checklist per Day */}
+              {dailyProductionSummaries.length > 0 && (
+                <div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+                    <h5 className="text-xs font-bold text-neutral-800 dark:text-neutral-200 uppercase tracking-wider flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Lista Direta da Cozinha por Dia (Quantidade Exata para Preparar)</span>
+                    </h5>
+                    <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                      Formato direto: <strong>Arroz para X pessoas</strong>, <strong>Feijão para X pessoas</strong>, <strong>Prato principal para X pessoas</strong>, <strong>Fruta: X unidades</strong>
+                    </span>
+                  </div>
+
+                  <div className="space-y-3">
+                    {(selectedCalcDay === 'all'
+                      ? dailyProductionSummaries
+                      : dailyProductionSummaries.filter((d) => d.serviceDate === selectedCalcDay)
+                    ).map((day) => (
+                      <div
+                        key={`direct-${day.serviceDate}`}
+                        className="border border-emerald-200 dark:border-emerald-800/80 rounded-xl bg-emerald-50/40 dark:bg-emerald-950/20 overflow-hidden"
+                      >
+                        <div className="px-3.5 py-2 bg-emerald-100/80 dark:bg-emerald-900/40 border-b border-emerald-200 dark:border-emerald-800/70 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="font-mono font-black text-emerald-900 dark:text-emerald-200">
+                              📅 {day.serviceDate}
+                            </span>
+                            <span className="font-bold text-neutral-800 dark:text-neutral-200">
+                              — {day.dayName}
+                            </span>
+                            <span className="text-[11px] font-mono text-neutral-600 dark:text-neutral-400">
+                              ({day.ordersCount} {day.ordersCount === 1 ? 'pedido' : 'pedidos'} • máx. {day.totalMaxPax} pessoas)
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const lines = [
+                                `PRODUÇÃO COZINHA - ${day.serviceDate} (${day.dayName})`,
+                                ...day.categoryDirectLines.map(
+                                  (ln) =>
+                                    `- ${ln.specLabel} (${ln.dishDetails}${
+                                      ln.category === 'fruta' ? '' : ` • ~${ln.estimatedAmount} ${ln.estimatedUnit}`
+                                    })`
+                                ),
+                              ].join('\n');
+                              try {
+                                await navigator.clipboard.writeText(lines);
+                                setCopied(true);
+                                setTimeout(() => setCopied(false), 2500);
+                              } catch {
+                                // ignore clipboard fallback
+                              }
+                            }}
+                            className="px-2.5 py-1 bg-white dark:bg-neutral-900 hover:bg-emerald-50 border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300 rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                          >
+                            <Copy className="w-3 h-3" />
+                            <span>Copiar Lista do Dia</span>
+                          </button>
+                        </div>
+
+                        <div className="p-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+                          {day.categoryDirectLines.map((line, lIdx) => (
+                            <div
+                              key={`${day.serviceDate}-${line.category}-${lIdx}`}
+                              className="flex items-start justify-between gap-2 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg px-3 py-2"
+                            >
+                              <div className="flex items-start gap-2 min-w-0">
+                                <span className="text-base leading-none mt-0.5 shrink-0">{line.icon}</span>
+                                <div className="min-w-0">
+                                  <div className="text-xs font-black text-neutral-900 dark:text-neutral-100">
+                                    {line.specLabel}
+                                  </div>
+                                  <div className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate" title={line.dishDetails}>
+                                    {line.dishDetails}
+                                  </div>
+                                </div>
+                              </div>
+                              <span className="text-[11px] font-mono font-bold text-emerald-700 dark:text-emerald-400 whitespace-nowrap shrink-0">
+                                {line.estimatedAmount} {line.estimatedUnit}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <h5 className="text-xs font-bold text-neutral-800 dark:text-neutral-200 uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   <Calendar className="w-3.5 h-3.5 text-emerald-600" />
@@ -1511,37 +1602,37 @@ export const CentralSpreadsheetView: React.FC = () => {
                               {day.ordersCount}
                             </td>
                             <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono">
-                              <div className="font-bold">{day.totalArrozPax} pax</div>
+                              <div className="font-bold">{day.totalArrozPax} pessoas</div>
                               <div className="text-[10px] text-neutral-500">{(Math.round(day.totalArrozPax * 0.09 * 100) / 100)} kg</div>
                             </td>
                             <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono">
-                              <div className="font-bold">{day.totalFeijaoPax} pax</div>
+                              <div className="font-bold">{day.totalFeijaoPax} pessoas</div>
                               <div className="text-[10px] text-neutral-500">{(Math.round(day.totalFeijaoPax * 0.07 * 100) / 100)} kg</div>
                             </td>
                             <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono">
-                              <div className="font-bold text-rose-700 dark:text-rose-400">{day.totalPrincipalPax} pax</div>
+                              <div className="font-bold text-rose-700 dark:text-rose-400">{day.totalPrincipalPax} pessoas</div>
                               <div className="text-[10px] text-neutral-500">{(Math.round(day.totalPrincipalPax * 0.14 * 100) / 100)} kg</div>
                             </td>
                             <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono">
-                              <div className="font-bold">{day.totalGuarnicaoPax} pax</div>
+                              <div className="font-bold">{day.totalGuarnicaoPax} pessoas</div>
                               <div className="text-[10px] text-neutral-500">{(Math.round(day.totalGuarnicaoPax * 0.09 * 100) / 100)} kg</div>
                             </td>
                             <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono">
-                              <div className="font-bold text-emerald-700 dark:text-emerald-400">{day.totalSaladaPax} pax</div>
+                              <div className="font-bold text-emerald-700 dark:text-emerald-400">{day.totalSaladaPax} pessoas</div>
                               <div className="text-[10px] text-neutral-500">{(Math.round(day.totalSaladaPax * 0.06 * 100) / 100)} kg</div>
                             </td>
                             <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono font-bold text-purple-700 dark:text-purple-400">
-                              {day.totalSobremesaPax} porç.
+                              {day.totalSobremesaPax} pessoas
                             </td>
                             <td className="px-3 py-2.5 border-r border-neutral-200 dark:border-neutral-700 text-center font-mono font-black text-emerald-900 dark:text-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20">
-                              {day.totalMaxPax} pax
+                              {day.totalMaxPax} pessoas
                             </td>
                             <td className="px-3 py-2.5">
                               {day.fruitsBreakdown.length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
+                                <div className="flex flex-col gap-1">
                                   {day.fruitsBreakdown.map((fr, fIdx) => (
-                                    <span key={fIdx} className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-[10px] font-mono font-bold text-amber-900 dark:text-amber-200">
-                                      {fr.name}: {fr.quantity} {fr.unit}
+                                    <span key={fIdx} className="text-[11px] font-bold text-amber-900 dark:text-amber-200 whitespace-nowrap">
+                                      {fr.specLabel}
                                     </span>
                                   ))}
                                 </div>
@@ -1636,6 +1727,7 @@ export const CentralSpreadsheetView: React.FC = () => {
                       <tr>
                         <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700">Data Refeição</th>
                         <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700">Dia</th>
+                        <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200">Especificação Direta p/ Cozinha</th>
                         <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700">Categoria</th>
                         <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700">Prato / Alimento Separado</th>
                         <th className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-center">Pedidos</th>
@@ -1647,7 +1739,7 @@ export const CentralSpreadsheetView: React.FC = () => {
                     <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
                       {filteredDailyDishItems.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="py-6 text-center text-neutral-400 italic">
+                          <td colSpan={9} className="py-6 text-center text-neutral-400 italic">
                             Nenhum prato ou alimento encontrado para o dia selecionado.
                           </td>
                         </tr>
@@ -1660,9 +1752,14 @@ export const CentralSpreadsheetView: React.FC = () => {
                             <td className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-neutral-700 dark:text-neutral-300 whitespace-nowrap">
                               {item.dayName}
                             </td>
+                            <td className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 font-black text-emerald-900 dark:text-emerald-200 bg-emerald-50/40 dark:bg-emerald-950/15 whitespace-nowrap">
+                              <span className="inline-flex items-center gap-1.5">
+                                <span>{item.icon}</span>
+                                <span>{item.kitchenSpecLabel}</span>
+                              </span>
+                            </td>
                             <td className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 whitespace-nowrap">
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-neutral-100 dark:bg-neutral-800 font-semibold text-neutral-800 dark:text-neutral-200">
-                                <span>{item.icon}</span>
                                 <span>{item.categoryLabel}</span>
                               </span>
                             </td>
@@ -1673,7 +1770,7 @@ export const CentralSpreadsheetView: React.FC = () => {
                               {item.ordersCount}
                             </td>
                             <td className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-right font-mono font-bold text-neutral-900 dark:text-neutral-100 whitespace-nowrap">
-                              {item.totalPeople} pessoas
+                              {item.totalPeople} {item.totalPeople === 1 ? 'pessoa' : 'pessoas'}
                             </td>
                             <td className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 text-center text-[11px] text-neutral-500 font-mono whitespace-nowrap">
                               {item.perCapitaLabel}
@@ -1688,7 +1785,7 @@ export const CentralSpreadsheetView: React.FC = () => {
                     {filteredDailyDishItems.length > 0 && (
                       <tfoot>
                         <tr className="bg-emerald-50 dark:bg-emerald-950/50 border-t-2 border-emerald-400 dark:border-emerald-700 font-black text-neutral-900 dark:text-neutral-100 font-mono">
-                          <td colSpan={4} className="px-3 py-2 border-r border-emerald-200 dark:border-emerald-800 font-sans uppercase text-[11px] text-emerald-900 dark:text-emerald-200">
+                          <td colSpan={5} className="px-3 py-2 border-r border-emerald-200 dark:border-emerald-800 font-sans uppercase text-[11px] text-emerald-900 dark:text-emerald-200">
                             Somatória dos Pratos & Alimentos Exibidos ({filteredDailyDishItems.length} itens)
                           </td>
                           <td className="px-3 py-2 border-r border-emerald-200 dark:border-emerald-800 text-center text-amber-700 dark:text-amber-300">

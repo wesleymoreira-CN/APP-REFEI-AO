@@ -39,6 +39,8 @@ import {
   APPS_SCRIPT_URL_STORAGE_KEY,
   AUTO_SYNC_APPS_SCRIPT_KEY,
   LAST_APPS_SCRIPT_SYNC_KEY,
+  getInitialAppsScriptUrl,
+  getInitialExternalSheetUrl,
   getLoadedExternalUsers,
   syncUsersFromExternalSheet,
   authenticateUserWithSheet,
@@ -214,21 +216,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   } | null>(null);
 
   // External Google Sheet & Apps Script URLs
-  const [externalSheetUrl, setExternalSheetUrlState] = useState<string>(() => {
-    try {
-      return localStorage.getItem(EXTERNAL_SHEET_URL_STORAGE_KEY) || '';
-    } catch {
-      return '';
-    }
-  });
+  const [externalSheetUrl, setExternalSheetUrlState] = useState<string>(() => getInitialExternalSheetUrl());
 
-  const [appsScriptUrl, setAppsScriptUrlState] = useState<string>(() => {
-    try {
-      return localStorage.getItem(APPS_SCRIPT_URL_STORAGE_KEY) || '';
-    } catch {
-      return '';
-    }
-  });
+  const [appsScriptUrl, setAppsScriptUrlState] = useState<string>(() => getInitialAppsScriptUrl());
 
   const [autoSyncAppsScript, setAutoSyncAppsScriptState] = useState<boolean>(() => {
     try {

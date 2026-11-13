@@ -150,39 +150,186 @@ function formatFriendlyFetchError(err: unknown, contextLabel: string): string {
   return raw;
 }
 
+export const SHEETS_PROXY_URL_STORAGE_KEY = 'cardapiopro_sheets_proxy_url_v1';
+
+function getSafeEnvVar(key: 'VITE_APPS_SCRIPT_URL' | 'VITE_EXTERNAL_SHEET_URL' | 'VITE_SHEETS_PROXY_URL'): string {
+  try {
+    const env = (import.meta as unknown as { env?: Record<string, string | undefined> })?.env;
+    return (env?.[key] || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+export function getInitialAppsScriptUrl(): string {
+  try {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const fromQuery = (params.get('scriptUrl') || '').trim();
+      if (fromQuery && isAppsScriptUrl(fromQuery)) {
+        localStorage.setItem(APPS_SCRIPT_URL_STORAGE_KEY, fromQuery);
+        return fromQuery;
+      }
+    }
+    const stored = (localStorage.getItem(APPS_SCRIPT_URL_STORAGE_KEY) || '').trim();
+    if (stored) return stored;
+  } catch {
+    // ignore storage errors
+  }
+  return getSafeEnvVar('VITE_APPS_SCRIPT_URL');
+}
+
+export function getInitialExternalSheetUrl(): string {
+  try {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const fromQuery = (params.get('sheetUrl') || '').trim();
+      if (fromQuery) {
+        localStorage.setItem(EXTERNAL_SHEET_URL_STORAGE_KEY, fromQuery);
+        return fromQuery;
+      }
+    }
+    const stored = (localStorage.getItem(EXTERNAL_SHEET_URL_STORAGE_KEY) || '').trim();
+    if (stored) return stored;
+  } catch {
+    // ignore storage errors
+  }
+  return getSafeEnvVar('VITE_EXTERNAL_SHEET_URL');
+}
+
+function normalizeAppsScriptEndpointUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl.trim());
+    if (parsed.hostname === 'script.google.com') {
+      parsed.pathname = parsed.pathname
+        .replace(/^\/a\/macros\/[^/]+\/s\//i, '/macros/s/')
+        .replace(/^\/macros\/u\/\d+\/s\//i, '/macros/s/');
+    }
+    return parsed.toString();
+  } catch {
+    return rawUrl.trim();
+  }
+}
+
+function detectDirectGoogleHtmlError(bodyText: string, finalUrl: string, status: number): string | null {
+  const lowerUrl = (finalUrl || '').toLowerCase();
+  const lowerBody = (bodyText || '').toLowerCase();
+  const trimmed = (bodyText || '').trim().toLowerCase();
+
+  if (lowerUrl.includes('accounts.google.com') || lowerUrl.includes('servicelogin')) {
+    return 'O Google redirecionou para login (accounts.google.com). No Apps Script, defina "Executar como: Eu" e "Quem pode acessar: Qualquer pessoa".';
+  }
+
+  if (trimmed.startsWith('<!doctype html') || trimmed.startsWith('<html')) {
+    if (lowerBody.includes('accounts.google.com') || lowerBody.includes('servicelogin') || lowerBody.includes('fazer login') || lowerBody.includes('sign in')) {
+      return 'O Apps Script ou Planilha exige login Google. Configure "Executar como: Eu" e "Quem pode acessar: Qualquer pessoa".';
+    }
+    if (lowerBody.includes('script function not found')) {
+      return 'Função doGet/doPost não encontrada no Apps Script. Salve o código completo e crie uma Nova Versão em Gerenciar implantações.';
+    }
+    if (lowerBody.includes('desculpe') || lowerBody.includes('sorry, unable to open') || lowerBody.includes('não foi possível abrir')) {
+      return `O Google retornou "Não foi possível abrir o arquivo" (HTTP ${status}). Verifique se "Quem pode acessar" está como "Qualquer pessoa".`;
+    }
+    return `O Google retornou HTML inesperado (HTTP ${status}). Confirme se a URL termina em /exec e está publicada para "Qualquer pessoa".`;
+  }
+
+  return null;
+}
+
 async function proxyGoogleRequest(
   targetUrl: string,
   method: 'GET' | 'POST',
   payload?: unknown
 ): Promise<{ ok: boolean; text?: string; message?: string }> {
-  // 1. Try server-side proxy (/api/sheets-proxy) first to avoid browser/iframe CORS errors
+  const proxyCandidates: string[] = ['/api/sheets-proxy', '/.netlify/functions/sheets-proxy'];
+  const customProxy = getSafeEnvVar('VITE_SHEETS_PROXY_URL');
+  if (customProxy) {
+    proxyCandidates.push(customProxy);
+  }
   try {
-    const proxyRes = await fetch('/api/sheets-proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: targetUrl, method, payload }),
-    });
+    const storedProxy = (localStorage.getItem(SHEETS_PROXY_URL_STORAGE_KEY) || '').trim();
+    if (storedProxy && !proxyCandidates.includes(storedProxy)) {
+      proxyCandidates.push(storedProxy);
+    }
+  } catch {
+    // ignore storage errors
+  }
 
-    if (proxyRes.status !== 404 && proxyRes.status !== 405) {
-      const proxyData = await proxyRes.json();
+  // 1. Try server-side proxy endpoints (/api/sheets-proxy, /.netlify/functions/sheets-proxy, or configured VITE_SHEETS_PROXY_URL)
+  for (const proxyEndpoint of proxyCandidates) {
+    try {
+      const proxyRes = await fetch(proxyEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: targetUrl, method, payload }),
+      });
+
+      if (proxyRes.status === 404 || proxyRes.status === 405) {
+        continue;
+      }
+
+      const contentType = (proxyRes.headers.get('content-type') || '').toLowerCase();
+      const rawText = await proxyRes.text();
+      const trimmed = rawText.trim().toLowerCase();
+
+      // Skip Netlify SPA HTML fallbacks (/* -> /index.html returning 200 text/html)
+      if (!contentType.includes('application/json') && (trimmed.startsWith('<!doctype') || trimmed.startsWith('<html'))) {
+        continue;
+      }
+
+      const proxyData = JSON.parse(rawText);
       if (proxyData && typeof proxyData.ok === 'boolean') {
         return proxyData;
       }
+    } catch {
+      // Try next proxy candidate or fall through to direct browser fetch
     }
-  } catch {
-    // Backend proxy unavailable (e.g. static hosting) -> fall through to direct browser fetch
   }
 
-  // 2. Fallback: Direct browser fetch
-  const directRes = await fetch(targetUrl, {
-    method,
-    redirect: 'follow',
-    headers:
-      method === 'POST'
-        ? { 'Content-Type': 'text/plain;charset=utf-8' }
-        : { Accept: 'application/json, text/csv, text/plain, */*' },
-    body: method === 'POST' ? JSON.stringify(payload ?? {}) : undefined,
-  });
+  // 2. Fallback: Direct browser fetch (CORS-safe, omitting credentials & preflight headers)
+  const normalizedTarget = normalizeAppsScriptEndpointUrl(targetUrl);
+  const directOptions: RequestInit =
+    method === 'POST'
+      ? {
+          method: 'POST',
+          mode: 'cors',
+          credentials: 'omit',
+          redirect: 'follow',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload ?? {}),
+        }
+      : {
+          method: 'GET',
+          mode: 'cors',
+          credentials: 'omit',
+          redirect: 'follow',
+        };
+
+  let directRes = await fetch(normalizedTarget, directOptions);
+  let text = await directRes.text();
+  let htmlErr = detectDirectGoogleHtmlError(text, directRes.url, directRes.status);
+
+  if ((htmlErr || !directRes.ok) && normalizedTarget !== targetUrl) {
+    try {
+      const retryRes = await fetch(targetUrl, directOptions);
+      const retryText = await retryRes.text();
+      const retryHtmlErr = detectDirectGoogleHtmlError(retryText, retryRes.url, retryRes.status);
+      if (retryRes.ok && !retryHtmlErr) {
+        directRes = retryRes;
+        text = retryText;
+        htmlErr = null;
+      }
+    } catch {
+      // keep initial result
+    }
+  }
+
+  if (htmlErr) {
+    return {
+      ok: false,
+      message: htmlErr,
+    };
+  }
 
   if (!directRes.ok) {
     return {
@@ -191,7 +338,6 @@ async function proxyGoogleRequest(
     };
   }
 
-  const text = await directRes.text();
   return { ok: true, text };
 }
 
@@ -322,7 +468,7 @@ var HEADERS = {
     'Observacoes', 'Status'
   ],
   Calculo_Diario_Cozinha: [
-    'Data_Refeicao', 'Dia_Semana', 'Categoria', 'Prato_Alimento',
+    'Data_Refeicao', 'Dia_Semana', 'Especificacao_Direta', 'Categoria', 'Prato_Alimento',
     'Qtd_Pedidos', 'Total_Pessoas_PAX', 'Qtd_Preparar_Cozinha',
     'Unidade', 'Base_Per_Capita'
   ],
@@ -1125,6 +1271,7 @@ export async function pushFullSyncToAppsScript(
   const dailyCalcRows = (payload.spreadsheet.sheets.calculoDiario?.rows || []).map((r) => [
     r.Data_Refeicao ?? '',
     r.Dia_Semana ?? '',
+    r.Especificacao_Direta ?? '',
     r.Categoria ?? '',
     r.Prato_Alimento ?? '',
     r.Qtd_Pedidos ?? 0,
