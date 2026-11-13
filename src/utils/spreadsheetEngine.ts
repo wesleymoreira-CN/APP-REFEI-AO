@@ -1,5 +1,6 @@
 import { WeeklyMenu, User, Dish, SystemSpreadsheet, SpreadsheetSheet, SpreadsheetRow, AuditLogEntry, ClientRampaOrder } from '../types';
 import { CATEGORY_LABELS } from './validators';
+import { getOrderRetentionInfo } from './orderRetention';
 
 const DEFAULT_PAX_RAMPA = 400;
 const DEFAULT_PAX_KILO = 250;
@@ -360,6 +361,8 @@ export function buildSystemSpreadsheet(
       ? order.fruits.map((f) => `${f.name}: ${f.quantity} ${f.unit}`).join('; ')
       : 'Sem frutas adicionais';
 
+    const retention = getOrderRetentionInfo(order);
+
     return {
       Linha: idx + 1,
       Protocolo: order.orderNumber,
@@ -367,6 +370,8 @@ export function buildSystemSpreadsheet(
       Email_Usuario: order.clientEmail,
       Setor_Grupo: order.departmentOrGroup,
       Telefone: order.clientPhone || 'Não informado',
+      Data_Solicitacao: retention.referenceDateBr,
+      Expira_Em: retention.statusLabel,
       Data_Refeicao: order.serviceDate,
       Dia_Semana: order.dayName || 'Rampa',
       Turno: order.mealShift,
@@ -380,7 +385,6 @@ export function buildSystemSpreadsheet(
       Fruta_Escalada: fruitsSummary,
       Total_Comensais_Max: order.numberOfPeople,
       Status: order.status === 'aprovado' ? 'Aprovado' : order.status === 'em_preparo' ? 'Em Preparo' : order.status === 'entregue' ? 'Entregue' : 'Solicitado',
-      Data_Solicitacao: order.orderDate,
       Observacoes: order.specialDietNotes || '—',
     };
   });
@@ -389,10 +393,12 @@ export function buildSystemSpreadsheet(
     id: 'pedidos',
     name: 'Pedidos_Usuarios_Rampa',
     title: 'Controle de Pedidos dos Usuários (Quantidades por Pessoa & Frutas)',
-    description: 'Acompanhamento consolidado de todas as refeições solicitadas por usuário: Arroz, Feijão, Principal, Guarnição, Salada e Frutas da rampa.',
+    description: 'Acompanhamento consolidado de todas as refeições solicitadas por usuário, com regra automática de exclusão do primeiro pedido a cada 8º dia corrido (ex: 08/10 → 15/10).',
     columns: [
       { key: 'Linha', label: '#', width: '50px', type: 'number' },
       { key: 'Protocolo', label: 'Protocolo', width: '120px', type: 'text' },
+      { key: 'Data_Solicitacao', label: 'Data Pedido', width: '110px', type: 'date' },
+      { key: 'Expira_Em', label: 'Auto-Exclusão (8º dia)', width: '185px', type: 'tag' },
       { key: 'Usuario_Solicitante', label: 'Usuário Solicitante', width: '200px', type: 'text' },
       { key: 'Email_Usuario', label: 'E-mail', width: '220px', type: 'text' },
       { key: 'Setor_Grupo', label: 'Setor / Grupo', width: '200px', type: 'text' },

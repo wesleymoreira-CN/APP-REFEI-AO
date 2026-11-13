@@ -307,6 +307,10 @@ export function generateGoogleAppsScriptCode(): string {
   AUDITORIA: 'Auditoria'
 };
 
+// Regra de 8 dias corridos: exemplo, pedido feito dia 08/10/2026 (1o dia)
+// atinge o 8o dia em 15/10/2026 (7 dias decorridos) e e apagado automaticamente.
+var RETENTION_DIFF_DAYS = 7;
+
 var HEADERS = {
   Usuarios: ['ID', 'Nome', 'Email', 'Senha', 'Setor', 'Perfil', 'Ativo', 'UltimoAcesso'],
   Pedidos_Rampa: [
@@ -314,7 +318,7 @@ var HEADERS = {
     'Setor_Grupo', 'Dia_Semana', 'Data_Servico', 'Turno', 'Total_Pessoas',
     'Arroz_Pessoas', 'Feijao_Pessoas', 'Prato_Principal_Pessoas',
     'Guarnicao_Pessoas', 'Salada_Pessoas', 'Frutas_Solicitadas',
-    'Observacoes', 'Status'
+    'Observacoes', 'Status', 'Expiracao_8_Dias'
   ],
   Cardapio_Semanal: [
     'Ano', 'Mes', 'Semana', 'Periodo', 'Tipo_Cardapio',
@@ -334,6 +338,9 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('CardapioPro')
     .addItem('Inicializar / Verificar Abas do Sistema', 'setupPlanilhaCardapioPro')
+    .addSeparator()
+    .addItem('Executar Limpeza Agora (Pedidos 8+ dias)', 'limparPedidosExpirados8DiasManual')
+    .addItem('Ativar Limpeza Automatica Diaria (8 dias)', 'instalarGatilhoLimpezaDiaria')
     .addToUi();
 }
 
@@ -361,14 +368,20 @@ function setupPlanilhaCardapioPro() {
     if (!sheet) {
       sheet = ss.insertSheet(tabName);
     }
+    var cols = HEADERS[tabName];
     if (sheet.getLastRow() === 0) {
-      var cols = HEADERS[tabName];
       sheet.getRange(1, 1, 1, cols.length).setValues([cols]);
       sheet.getRange(1, 1, 1, cols.length)
         .setBackground('#065f46')
         .setFontColor('#ffffff')
         .setFontWeight('bold');
       sheet.setFrozenRows(1);
+    } else if (tabName === SHEET_NAMES.PEDIDOS && sheet.getLastColumn() < cols.length) {
+      sheet.getRange(1, 1, 1, cols.length).setValues([cols]);
+      sheet.getRange(1, 1, 1, cols.length)
+        .setBackground('#065f46')
+        .setFontColor('#ffffff')
+        .setFontWeight('bold');
     }
   });
 
@@ -388,6 +401,53 @@ function setupPlanilhaCardapioPro() {
   return ss;
 }
 
+// Funcao publica para ser chamada por Gatilho Diario automatico no Apps Script
+function limparPedidosExpirados8Dias() {
+  var ss = setupPlanilhaCardapioPro();
+  return limparPedidosAntigos_(ss);
+}
+
+// Chamada manual pelo menu CardapioPro na barra superior do Google Sheets
+function limparPedidosExpirados8DiasManual() {
+  var ss = setupPlanilhaCardapioPro();
+  var res = limparPedidosAntigos_(ss);
+  var msg = res.removedCount > 0
+    ? (res.removedCount + ' pedido(s) com 8+ dias apagado(s) automaticamente: ' + res.removedNumbers.join(', '))
+    : 'Nenhum pedido atingiu o 8o dia (ex: 08/10 -> 15/10) ate o momento.';
+  try {
+    SpreadsheetApp.getUi().alert('Regra de Limpeza (8 Dias)', msg, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {
+    // Sem UI ativa
+  }
+  return res;
+}
+
+// Instala gatilho diario automatico (roda todo dia entre 01h e 02h mesmo com o app fechado)
+function instalarGatilhoLimpezaDiaria() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'limparPedidosExpirados8Dias') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger('limparPedidosExpirados8Dias')
+    .timeBased()
+    .everyDays(1)
+    .atHour(1)
+    .create();
+
+  var res = limparPedidosExpirados8Dias();
+  try {
+    SpreadsheetApp.getUi().alert(
+      'Limpeza Automatica Ativada',
+      'Gatilho diario configurado! Todo dia a partir de 01h da manha, pedidos que atingirem o 8o dia (ex: pedido dia 08/10 -> apagado dia 15/10) serao removidos automaticamente. Limpeza inicial removida agora: ' + res.removedCount + ' pedido(s).',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  } catch (e) {
+    // Sem UI ativa
+  }
+}
+
 function jsonResponse(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
@@ -395,11 +455,12 @@ function jsonResponse(obj) {
 }
 
 // Endpoint GET: Leitura em tempo real de usuarios e verificacao de conexao
-// Exemplos: ?action=ping | ?action=getUsers | ?action=syncAll
+// Exemplos: ?action=ping | ?action=getUsers | ?action=syncAll | ?action=cleanupOrders
 function doGet(e) {
   try {
     var action = (e && e.parameter && e.parameter.action) ? String(e.parameter.action) : 'getUsers';
     var ss = setupPlanilhaCardapioPro();
+    var cleanup = limparPedidosAntigos_(ss);
 
     if (action === 'ping') {
       return jsonResponse({
@@ -407,7 +468,17 @@ function doGet(e) {
         service: 'CardapioPro Apps Script',
         sheetName: ss.getName(),
         sheetId: ss.getId(),
+        cleanup: cleanup,
         timestamp: new Date().toISOString()
+      });
+    }
+
+    if (action === 'cleanupOrders') {
+      return jsonResponse({
+        ok: true,
+        sheetName: ss.getName(),
+        cleanup: cleanup,
+        syncedAt: new Date().toISOString()
       });
     }
 
@@ -419,6 +490,7 @@ function doGet(e) {
         sheetName: ss.getName(),
         users: users,
         orders: orders,
+        cleanup: cleanup,
         count: users.length,
         syncedAt: new Date().toISOString()
       });
@@ -439,10 +511,24 @@ function doPost(e) {
     var ss = setupPlanilhaCardapioPro();
 
     if (action === 'testConnection') {
+      var testCleanup = limparPedidosAntigos_(ss);
       return jsonResponse({
         ok: true,
         message: 'Conexao POST confirmada com a planilha "' + ss.getName() + '".',
         sheetName: ss.getName(),
+        cleanup: testCleanup,
+        syncedAt: new Date().toISOString()
+      });
+    }
+
+    if (action === 'cleanupOrders') {
+      var manualCleanup = limparPedidosAntigos_(ss);
+      return jsonResponse({
+        ok: true,
+        message: manualCleanup.removedCount > 0
+          ? (manualCleanup.removedCount + ' pedido(s) expirado(s) (8+ dias) removido(s) da planilha.')
+          : 'Nenhum pedido atingiu 8 dias para exclusao.',
+        cleanup: manualCleanup,
         syncedAt: new Date().toISOString()
       });
     }
@@ -458,9 +544,11 @@ function doPost(e) {
 
     if (action === 'upsertOrder' && body.order) {
       upsertOrderRow_(ss, body.order);
+      var orderCleanup = limparPedidosAntigos_(ss);
       return jsonResponse({
         ok: true,
         message: 'Pedido ' + (body.order.orderNumber || '') + ' gravado na aba Pedidos_Rampa.',
+        cleanup: orderCleanup,
         syncedAt: new Date().toISOString()
       });
     }
@@ -471,7 +559,11 @@ function doPost(e) {
         counts.users = writeUsersMerge_(ss, body.users);
       }
       if (Array.isArray(body.orders)) {
-        counts.orders = replaceTableRows_(ss.getSheetByName(SHEET_NAMES.PEDIDOS), HEADERS.Pedidos_Rampa, body.orders.map(formatOrderRow_));
+        var activeOrdersOnly = body.orders.filter(function (ord) {
+          var refDate = parseDataPedido_(ord.orderDate || ord.createdAt || ord.serviceDate);
+          return !isPedidoExpirado8Dias_(refDate);
+        });
+        counts.orders = replaceTableRows_(ss.getSheetByName(SHEET_NAMES.PEDIDOS), HEADERS.Pedidos_Rampa, activeOrdersOnly.map(formatOrderRow_));
       }
       if (Array.isArray(body.menuRows)) {
         counts.menuRows = replaceTableRows_(ss.getSheetByName(SHEET_NAMES.CARDAPIO), HEADERS.Cardapio_Semanal, body.menuRows);
@@ -483,11 +575,13 @@ function doPost(e) {
         counts.auditRows = replaceTableRows_(ss.getSheetByName(SHEET_NAMES.AUDITORIA), HEADERS.Auditoria, body.auditRows);
       }
 
+      var syncCleanup = limparPedidosAntigos_(ss);
       return jsonResponse({
         ok: true,
         message: 'Sincronizacao completa gravada na planilha "' + ss.getName() + '"!',
         sheetName: ss.getName(),
         counts: counts,
+        cleanup: syncCleanup,
         syncedAt: new Date().toISOString()
       });
     }
@@ -645,10 +739,13 @@ function formatOrderRow_(order) {
     ? order.fruits.map(function (f) { return f.name + ': ' + f.quantity + ' ' + f.unit; }).join(' | ')
     : '';
 
+  var refDate = parseDataPedido_(order.orderDate || order.createdAt || order.serviceDate);
+  var expiracaoBr = refDate ? calcularExpiracao8DiasBr_(refDate) : '';
+
   return [
     order.id || '',
     order.orderNumber || '',
-    order.createdAt || order.orderDate || '',
+    order.orderDate || order.createdAt || '',
     order.clientName || '',
     order.clientEmail || '',
     order.departmentOrGroup || '',
@@ -663,7 +760,8 @@ function formatOrderRow_(order) {
     countCat(['salada']),
     frutasTxt,
     order.specialDietNotes || '',
-    order.status || 'solicitado'
+    order.status || 'solicitado',
+    expiracaoBr
   ];
 }
 
@@ -684,6 +782,123 @@ function upsertOrderRow_(ss, order) {
     sheet.insertRowAfter(1);
     sheet.getRange(2, 1, 1, rowValues.length).setValues([rowValues]);
   }
+}
+
+// ==================== REGRA DE AUTO-EXCLUSAO (8 DIAS) ====================
+
+function parseDataPedido_(rawVal) {
+  if (!rawVal) return null;
+  if (Object.prototype.toString.call(rawVal) === '[object Date]') {
+    if (isNaN(rawVal.getTime())) return null;
+    return new Date(rawVal.getFullYear(), rawVal.getMonth(), rawVal.getDate());
+  }
+  var s = String(rawVal).trim();
+  if (!s) return null;
+
+  var isoMatch = s.match(/^(\\d{4})-(\\d{1,2})-(\\d{1,2})/);
+  if (isoMatch) {
+    return new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+  }
+
+  var brMatch = s.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{2,4})/);
+  if (brMatch) {
+    var yr = Number(brMatch[3]);
+    if (yr < 100) yr += 2000;
+    return new Date(yr, Number(brMatch[2]) - 1, Number(brMatch[1]));
+  }
+
+  var parsed = new Date(s);
+  if (isNaN(parsed.getTime())) return null;
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+}
+
+function formatarDataBr_(d) {
+  var dd = ('0' + d.getDate()).slice(-2);
+  var mm = ('0' + (d.getMonth() + 1)).slice(-2);
+  return dd + '/' + mm + '/' + d.getFullYear();
+}
+
+function calcularExpiracao8DiasBr_(refDate) {
+  var exp = new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate() + RETENTION_DIFF_DAYS);
+  return 'Apaga em ' + formatarDataBr_(exp) + ' (8o dia)';
+}
+
+function isPedidoExpirado8Dias_(refDate) {
+  if (!refDate) return false;
+  var agora = new Date();
+  var hoje = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate());
+  var diffDays = Math.floor((hoje.getTime() - refDate.getTime()) / 86400000);
+  return diffDays >= RETENTION_DIFF_DAYS;
+}
+
+function limparPedidosAntigos_(ss) {
+  var sheet = ss.getSheetByName(SHEET_NAMES.PEDIDOS);
+  if (!sheet || sheet.getLastRow() <= 1) {
+    return { removedCount: 0, removedNumbers: [] };
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0].map(function (h) { return String(h).toLowerCase().trim(); });
+  var idxCriacao = findCol_(headers, ['data_criacao', 'data_solicitacao', 'created']);
+  if (idxCriacao === -1) idxCriacao = 2;
+  var idxServico = findCol_(headers, ['data_servico', 'data_refeicao']);
+  if (idxServico === -1) idxServico = 7;
+  var idxNumero = findCol_(headers, ['numero_pedido', 'protocolo']);
+  if (idxNumero === -1) idxNumero = 1;
+  var idxCliente = findCol_(headers, ['cliente', 'usuario']);
+  if (idxCliente === -1) idxCliente = 3;
+
+  var expiredRows = [];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var refDate = parseDataPedido_(row[idxCriacao]) || parseDataPedido_(row[idxServico]);
+    if (isPedidoExpirado8Dias_(refDate)) {
+      expiredRows.push({
+        rowIndex: i + 1,
+        refTime: refDate ? refDate.getTime() : 0,
+        refBr: refDate ? formatarDataBr_(refDate) : '',
+        numero: String(row[idxNumero] || ('Linha ' + (i + 1))),
+        cliente: String(row[idxCliente] || '')
+      });
+    }
+  }
+
+  if (expiredRows.length === 0) {
+    return { removedCount: 0, removedNumbers: [] };
+  }
+
+  // Ordena mais antigo primeiro para registro cronologico (primeiro pedido primeiro)
+  expiredRows.sort(function (a, b) { return a.refTime - b.refTime; });
+  var removedNumbers = expiredRows.map(function (item) { return item.numero; });
+
+  // Apaga de baixo para cima para preservar os indices das linhas
+  var descRows = expiredRows.slice().sort(function (a, b) { return b.rowIndex - a.rowIndex; });
+  for (var k = 0; k < descRows.length; k++) {
+    sheet.deleteRow(descRows[k].rowIndex);
+  }
+
+  // Registra na aba Auditoria
+  var auditSheet = ss.getSheetByName(SHEET_NAMES.AUDITORIA);
+  if (auditSheet) {
+    var nowStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'America/Sao_Paulo', 'dd/MM/yyyy HH:mm:ss');
+    for (var m = 0; m < expiredRows.length; m++) {
+      var item = expiredRows[m];
+      auditSheet.insertRowAfter(1);
+      auditSheet.getRange(2, 1, 1, 6).setValues([[
+        'auto-del-' + Date.now() + '-' + m,
+        nowStr,
+        'Sistema (Regra 8 Dias)',
+        'AUTO_EXCLUSAO_8_DIAS',
+        'Pedidos_Rampa',
+        'Pedido ' + item.numero + ' (' + item.cliente + ') criado em ' + item.refBr + ' atingiu o 8o dia e foi apagado automaticamente.'
+      ]]);
+    }
+  }
+
+  return {
+    removedCount: expiredRows.length,
+    removedNumbers: removedNumbers
+  };
 }
 
 function replaceTableRows_(sheet, headerCols, rows) {
@@ -1122,4 +1337,37 @@ export function authenticateUserWithSheet(
     success: true,
     user: authenticatedUser,
   };
+}
+
+/**
+ * Triggers automatic 8-day order cleanup on the connected Google Apps Script sheet
+ */
+export async function triggerAppsScriptCleanup(scriptUrl: string): Promise<{
+  success: boolean;
+  removedCount: number;
+  message?: string;
+}> {
+  const validation = validateAppsScriptEndpoint(scriptUrl);
+  if (!validation.valid) {
+    return { success: false, removedCount: 0 };
+  }
+
+  try {
+    const proxyResult = await proxyGoogleRequest(validation.cleanUrl, 'POST', {
+      action: 'cleanupOrders',
+    });
+    if (!proxyResult.ok || !proxyResult.text) {
+      return { success: false, removedCount: 0, message: proxyResult.message };
+    }
+    const data = JSON.parse(proxyResult.text);
+    const removedCount = Number(data?.cleanup?.removedCount || 0);
+    return {
+      success: Boolean(data?.ok),
+      removedCount,
+      message: data?.message,
+    };
+  } catch (e) {
+    console.warn('Apps Script cleanup request failed:', e);
+    return { success: false, removedCount: 0 };
+  }
 }

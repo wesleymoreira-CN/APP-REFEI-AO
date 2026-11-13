@@ -46,7 +46,9 @@ import {
   pushFullSyncToAppsScript,
   pushSingleOrderToAppsScript,
   pushSingleUserToAppsScript,
+  triggerAppsScriptCleanup,
 } from '../services/externalDatabaseService';
+import { splitExpiredOrders, getOrderRetentionInfo } from '../utils/orderRetention';
 
 interface AppContextType {
   currentUser: User | null;
@@ -130,6 +132,14 @@ interface AppContextType {
   addClientOrder: (order: Omit<ClientRampaOrder, 'id' | 'orderNumber' | 'createdAt' | 'status'>) => ClientRampaOrder;
   updateClientOrderStatus: (orderId: string, status: ClientRampaOrder['status']) => void;
   deleteClientOrder: (orderId: string) => void;
+  // Automatic 8-day order retention & purge rule
+  autoPurge8Days: boolean;
+  setAutoPurge8Days: (enabled: boolean) => void;
+  lastAutoPurgeInfo: { count: number; protocols: string[]; ranAt: string } | null;
+  runOrderRetentionPurge: (options?: { force?: boolean }) => {
+    removedCount: number;
+    removedOrders: ClientRampaOrder[];
+  };
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -143,6 +153,7 @@ const STORAGE_THEME = 'cardapiopro_theme_v3';
 const STORAGE_AUDIT = 'cardapiopro_audit_log_v3';
 const STORAGE_SPREADSHEET = 'cardapiopro_spreadsheet_v3';
 const STORAGE_CLIENT_ORDERS = 'cardapiopro_client_orders_v3';
+const STORAGE_AUTO_PURGE_8_DAYS = 'cardapiopro_auto_purge_8_days_v1';
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Theme state: light or dark
@@ -401,11 +412,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const isClient = Boolean(currentUser?.role === 'cliente');
   const canEdit = Boolean(isMaster || isAdmin);
 
-  // Client Rampa & Fruit Orders state
+  // 8-day automatic order retention toggle (default ON: ex. 08/10 -> purged automatically on 15/10)
+  const [autoPurge8Days, setAutoPurge8DaysState] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_AUTO_PURGE_8_DAYS);
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
+
+  const setAutoPurge8Days = (enabled: boolean) => {
+    setAutoPurge8DaysState(enabled);
+    try {
+      localStorage.setItem(STORAGE_AUTO_PURGE_8_DAYS, String(enabled));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const initialPurgedOrdersRef = React.useRef<ClientRampaOrder[]>([]);
+  const [lastAutoPurgeInfo, setLastAutoPurgeInfo] = useState<{
+    count: number;
+    protocols: string[];
+    ranAt: string;
+  } | null>(null);
+
+  // Client Rampa & Fruit Orders state (auto-purging expired orders on init if enabled)
   const [clientOrders, setClientOrders] = useState<ClientRampaOrder[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_CLIENT_ORDERS);
-      return saved ? JSON.parse(saved) : INITIAL_CLIENT_ORDERS;
+      const parsed: ClientRampaOrder[] = saved ? JSON.parse(saved) : INITIAL_CLIENT_ORDERS;
+      const autoEnabled = localStorage.getItem(STORAGE_AUTO_PURGE_8_DAYS) !== 'false';
+      if (autoEnabled) {
+        const { activeOrders, expiredOrders } = splitExpiredOrders(parsed);
+        if (expiredOrders.length > 0) {
+          initialPurgedOrdersRef.current = expiredOrders;
+          localStorage.setItem(STORAGE_CLIENT_ORDERS, JSON.stringify(activeOrders));
+        }
+        return activeOrders;
+      }
+      return parsed;
     } catch {
       return INITIAL_CLIENT_ORDERS;
     }
@@ -885,8 +932,96 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Client Orders Management
+  const runOrderRetentionPurge = useCallback(
+    (options?: { force?: boolean }) => {
+      if (!autoPurge8Days && !options?.force) {
+        return { removedCount: 0, removedOrders: [] as ClientRampaOrder[] };
+      }
+
+      const { activeOrders, expiredOrders } = splitExpiredOrders(clientOrders);
+      if (expiredOrders.length === 0) {
+        if (appsScriptUrl && options?.force) {
+          void triggerAppsScriptCleanup(appsScriptUrl);
+        }
+        return { removedCount: 0, removedOrders: [] as ClientRampaOrder[] };
+      }
+
+      setClientOrders(activeOrders);
+      setLastAutoPurgeInfo({
+        count: expiredOrders.length,
+        protocols: expiredOrders.map((o) => o.orderNumber),
+        ranAt: new Date().toISOString(),
+      });
+
+      expiredOrders.forEach((ord) => {
+        const info = getOrderRetentionInfo(ord);
+        logAudit(
+          'Auto-Exclusão (Regra 8 Dias)',
+          'Planilha de Pedidos',
+          `Pedido "${ord.orderNumber}" de ${ord.clientName} (criado em ${info.referenceDateBr}) atingiu o 8º dia (${info.expirationDateBr}) e foi apagado automaticamente.`
+        );
+      });
+
+      if (appsScriptUrl && autoSyncAppsScript) {
+        void triggerAppsScriptCleanup(appsScriptUrl);
+      }
+
+      return {
+        removedCount: expiredOrders.length,
+        removedOrders: expiredOrders,
+      };
+    },
+    [autoPurge8Days, clientOrders, appsScriptUrl, autoSyncAppsScript, logAudit]
+  );
+
+  // Record initial startup auto-purged orders in audit log & trigger remote sheet cleanup once
+  useEffect(() => {
+    if (initialPurgedOrdersRef.current.length > 0) {
+      const purged = initialPurgedOrdersRef.current;
+      initialPurgedOrdersRef.current = [];
+      setLastAutoPurgeInfo({
+        count: purged.length,
+        protocols: purged.map((o) => o.orderNumber),
+        ranAt: new Date().toISOString(),
+      });
+      purged.forEach((ord) => {
+        const info = getOrderRetentionInfo(ord);
+        logAudit(
+          'Auto-Exclusão (Regra 8 Dias)',
+          'Planilha de Pedidos',
+          `Pedido "${ord.orderNumber}" de ${ord.clientName} (criado em ${info.referenceDateBr}) atingiu o 8º dia (${info.expirationDateBr}) e foi apagado automaticamente ao abrir o app.`
+        );
+      });
+      if (appsScriptUrl && autoSyncAppsScript) {
+        void triggerAppsScriptCleanup(appsScriptUrl);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Periodic & window-focus check so crossing midnight into the 8th day auto-deletes expired orders
+  useEffect(() => {
+    if (!autoPurge8Days) return;
+    const intervalId = window.setInterval(() => {
+      runOrderRetentionPurge();
+    }, 60_000);
+    const onFocus = () => {
+      runOrderRetentionPurge();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [autoPurge8Days, runOrderRetentionPurge]);
+
   const addClientOrder = (data: Omit<ClientRampaOrder, 'id' | 'orderNumber' | 'createdAt' | 'status'>): ClientRampaOrder => {
-    const nextCount = clientOrders.length + 1;
+    const maxNum = clientOrders.reduce((max, o) => {
+      const m = String(o.orderNumber || '').match(/(\d+)$/);
+      const n = m ? Number(m[1]) : 0;
+      return n > max ? n : max;
+    }, 0);
+    const nextCount = Math.max(clientOrders.length + 1, maxNum + 1);
     const newOrder: ClientRampaOrder = {
       ...data,
       id: `order-${Date.now()}`,
@@ -1528,6 +1663,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addClientOrder,
         updateClientOrderStatus,
         deleteClientOrder,
+        autoPurge8Days,
+        setAutoPurge8Days,
+        lastAutoPurgeInfo,
+        runOrderRetentionPurge,
         // External Google Sheets Database & Apps Script
         externalSheetUrl,
         setExternalSheetUrl,

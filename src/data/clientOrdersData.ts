@@ -99,6 +99,39 @@ export const CANONICAL_FRUITS: AvailableFruit[] = [
   },
 ];
 
+function buildRelativeOrderDates(daysAgo: number): {
+  orderDate: string;
+  serviceDate: string;
+  dayName: string;
+  createdAt: string;
+} {
+  const now = new Date();
+  const ref = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysAgo, 9, 30, 0);
+  const yyyy = ref.getFullYear();
+  const mm = String(ref.getMonth() + 1).padStart(2, '0');
+  const dd = String(ref.getDate()).padStart(2, '0');
+  const weekdayNames = [
+    'Domingo',
+    'Segunda-feira',
+    'Terça-feira',
+    'Quarta-feira',
+    'Quinta-feira',
+    'Sexta-feira',
+    'Sábado',
+  ];
+
+  return {
+    orderDate: `${yyyy}-${mm}-${dd}`,
+    serviceDate: `${dd}/${mm}/${yyyy}`,
+    dayName: weekdayNames[ref.getDay()] || 'Segunda-feira',
+    createdAt: `${yyyy}-${mm}-${dd}T09:30:00`,
+  };
+}
+
+const sampleDateOldest = buildRelativeOrderDates(5);
+const sampleDateMiddle = buildRelativeOrderDates(2);
+const sampleDateToday = buildRelativeOrderDates(0);
+
 export const INITIAL_CLIENT_ORDERS: ClientRampaOrder[] = [
   {
     id: 'order-1',
@@ -107,9 +140,9 @@ export const INITIAL_CLIENT_ORDERS: ClientRampaOrder[] = [
     clientEmail: 'wesley.moreira@comunidadecancaonova.com',
     clientPhone: '(12) 3186-2000',
     departmentOrGroup: 'Coordenação de Nutrição & Alimentação',
-    orderDate: '2026-10-08',
-    serviceDate: '08/10/2026',
-    dayName: 'Segunda-feira',
+    orderDate: sampleDateOldest.orderDate,
+    serviceDate: sampleDateOldest.serviceDate,
+    dayName: sampleDateOldest.dayName,
     mealShift: 'Almoço',
     numberOfPeople: 10,
     mealItems: [
@@ -125,7 +158,7 @@ export const INITIAL_CLIENT_ORDERS: ClientRampaOrder[] = [
     ],
     specialDietNotes: 'Pedido teste oficial do sistema de rampa com quantitativo detalhado por pessoa.',
     status: 'aprovado',
-    createdAt: '2026-10-08T09:30:00Z',
+    createdAt: sampleDateOldest.createdAt,
   },
   {
     id: 'order-2',
@@ -134,9 +167,9 @@ export const INITIAL_CLIENT_ORDERS: ClientRampaOrder[] = [
     clientEmail: 'eventos.retiros@cancaonova.com',
     clientPhone: '(12) 3186-2000',
     departmentOrGroup: 'Retiro Nacional de Jovens Sarados',
-    orderDate: '2026-10-08',
-    serviceDate: '09/10/2026',
-    dayName: 'Terça-feira',
+    orderDate: sampleDateMiddle.orderDate,
+    serviceDate: sampleDateMiddle.serviceDate,
+    dayName: sampleDateMiddle.dayName,
     mealShift: 'Almoço',
     numberOfPeople: 350,
     mealItems: [
@@ -152,7 +185,7 @@ export const INITIAL_CLIENT_ORDERS: ClientRampaOrder[] = [
     ],
     specialDietNotes: 'Temos aproximadamente 15 pessoas vegetarianas e 3 celíacos no grupo.',
     status: 'aprovado',
-    createdAt: '2026-10-08T10:15:00Z',
+    createdAt: sampleDateMiddle.createdAt,
   },
   {
     id: 'order-3',
@@ -161,9 +194,9 @@ export const INITIAL_CLIENT_ORDERS: ClientRampaOrder[] = [
     clientEmail: 'cliente.peregrinos@cancaonova.com',
     clientPhone: '(11) 98765-4321',
     departmentOrGroup: 'Caravana Peregrinos de Fátima (3 Ônibus)',
-    orderDate: '2026-10-08',
-    serviceDate: '10/10/2026',
-    dayName: 'Quarta-feira',
+    orderDate: sampleDateToday.orderDate,
+    serviceDate: sampleDateToday.serviceDate,
+    dayName: sampleDateToday.dayName,
     mealShift: 'Almoço',
     numberOfPeople: 140,
     mealItems: [
@@ -179,6 +212,6 @@ export const INITIAL_CLIENT_ORDERS: ClientRampaOrder[] = [
     ],
     specialDietNotes: 'Idosos no grupo: evitar alimentos com excesso de sódio ou pimenta.',
     status: 'solicitado',
-    createdAt: '2026-10-08T14:30:00Z',
+    createdAt: sampleDateToday.createdAt,
   },
 ];

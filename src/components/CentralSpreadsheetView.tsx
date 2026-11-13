@@ -33,6 +33,7 @@ import {
   sheetToTsv, 
   sheetToCsv 
 } from '../utils/spreadsheetEngine';
+import { getNextExpiringOrder } from '../utils/orderRetention';
 import { GoogleSheetsDatabaseModal } from './GoogleSheetsDatabaseModal';
 
 export const CentralSpreadsheetView: React.FC = () => {
@@ -62,6 +63,11 @@ export const CentralSpreadsheetView: React.FC = () => {
     appsScriptUrl,
     syncAllWithAppsScript,
     isSyncingDatabase,
+    clientOrders,
+    autoPurge8Days,
+    setAutoPurge8Days,
+    lastAutoPurgeInfo,
+    runOrderRetentionPurge,
   } = useApp();
 
   // Active view tab in spreadsheet:
@@ -181,6 +187,11 @@ export const CentralSpreadsheetView: React.FC = () => {
       String(r.Dia_Semana || '').toLowerCase().includes(term)
     );
   }, [spreadsheet.sheets.pedidos?.rows, filterSearch]);
+
+  const nextExpiringOrder = React.useMemo(
+    () => getNextExpiringOrder(clientOrders),
+    [clientOrders]
+  );
 
   const dayKeys = ['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'] as const;
 
@@ -1061,6 +1072,76 @@ export const CentralSpreadsheetView: React.FC = () => {
             </div>
           </div>
 
+          {/* 8-Day Automatic Deletion Rule Banner */}
+          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/80 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span className="font-bold text-amber-900 dark:text-amber-200">
+                  Regra Automática da Planilha: Auto-Exclusão do Primeiro Pedido no 8º Dia
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                  autoPurge8Days
+                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300'
+                    : 'bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
+                }`}>
+                  {autoPurge8Days ? 'Regra Ativa' : 'Pausada'}
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-900/80 dark:text-amber-200/80 leading-relaxed">
+                Cada pedido permanece por 7 dias completos e é apagado automaticamente ao atingir o <strong>8º dia corrido</strong>{' '}
+                (ex.: pedido feito na segunda <strong>08/10/2026</strong> → apagado automaticamente em <strong>15/10/2026</strong>).
+                {nextExpiringOrder && (
+                  <>
+                    {' '}Próximo da fila: <strong className="font-mono">{nextExpiringOrder.order.orderNumber}</strong>{' '}
+                    (feito em {nextExpiringOrder.info.referenceDateBr} →{' '}
+                    <strong>{nextExpiringOrder.info.expirationDateBr}</strong>).
+                  </>
+                )}
+              </p>
+              {lastAutoPurgeInfo && lastAutoPurgeInfo.count > 0 && (
+                <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                  Última auto-exclusão: {lastAutoPurgeInfo.count} pedido(s) removido(s) ({lastAutoPurgeInfo.protocols.join(', ')}).
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+              {isAdmin && (
+                <label className="flex items-center gap-1.5 text-[11px] font-semibold text-neutral-700 dark:text-neutral-300 cursor-pointer select-none bg-white dark:bg-neutral-900 px-3 py-1.5 rounded-xl border border-amber-200 dark:border-amber-800/70">
+                  <input
+                    type="checkbox"
+                    checked={autoPurge8Days}
+                    onChange={(e) => setAutoPurge8Days(e.target.checked)}
+                    className="rounded border-neutral-300 text-amber-600 focus:ring-amber-500"
+                  />
+                  <span>Apagar automaticamente no 8º dia</span>
+                </label>
+              )}
+
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const res = runOrderRetentionPurge({ force: true });
+                    setSyncToast({
+                      type: 'success',
+                      text:
+                        res.removedCount > 0
+                          ? `${res.removedCount} pedido(s) que atingiram 8 dias apagado(s): ${res.removedOrders.map((o) => o.orderNumber).join(', ')}.`
+                          : 'Verificação concluída: nenhum pedido atingiu o 8º dia até hoje.',
+                    });
+                    setTimeout(() => setSyncToast(null), 5000);
+                  }}
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] rounded-xl flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Verificar & Limpar 8+ Dias</span>
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Quick Metrics Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="bg-white dark:bg-neutral-900 p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-2xs">
@@ -1258,6 +1339,22 @@ export const CentralSpreadsheetView: React.FC = () => {
                               return (
                                 <td key={col.key} className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 whitespace-nowrap font-mono font-bold text-amber-700 dark:text-amber-400">
                                   {String(val ?? '—')}
+                                </td>
+                              );
+                            }
+
+                            if (col.key === 'Expira_Em') {
+                              const expText = String(val ?? '—');
+                              const isTomorrowOrExpired = expText.includes('amanhã') || expText.includes('Expirado');
+                              return (
+                                <td key={col.key} className="px-3 py-2 border-r border-neutral-200 dark:border-neutral-700 whitespace-nowrap">
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-mono border ${
+                                    isTomorrowOrExpired
+                                      ? 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/70 dark:text-amber-300 dark:border-amber-800'
+                                      : 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800'
+                                  }`}>
+                                    {expText}
+                                  </span>
                                 </td>
                               );
                             }
