@@ -37,7 +37,13 @@ export const AuthGatewayPage: React.FC<AuthGatewayPageProps> = ({
   const [mode, setMode] = useState<'login' | 'register'>(initialMode);
 
   // Login Form State
-  const [loginEmail, setLoginEmail] = useState('');
+  const [loginEmail, setLoginEmail] = useState(() => {
+    try {
+      return localStorage.getItem('cardapiopro_remembered_email_v1') || '';
+    } catch {
+      return '';
+    }
+  });
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
@@ -94,6 +100,15 @@ export const AuthGatewayPage: React.FC<AuthGatewayPageProps> = ({
       if (!res.success) {
         setErrorMsg(res.message || 'Erro ao realizar login.');
       } else {
+        try {
+          if (rememberMe) {
+            localStorage.setItem('cardapiopro_remembered_email_v1', loginEmail.trim().toLowerCase());
+          } else {
+            localStorage.removeItem('cardapiopro_remembered_email_v1');
+          }
+        } catch {
+          // ignore storage errors
+        }
         setSuccessMsg('Autenticação bem-sucedida! Carregando cardápios...');
         setTimeout(() => {
           if (onAuthSuccess) onAuthSuccess();
@@ -175,6 +190,10 @@ export const AuthGatewayPage: React.FC<AuthGatewayPageProps> = ({
           setGoogleError(res.message || 'Não foi possível autenticar este usuário.');
           return;
         }
+      } else if (mode === 'login') {
+        setIsGoogleLoading(false);
+        setGoogleError(`O e-mail "${clean}" não consta no cadastro de usuários. Utilize a aba "Cadastrar Novo Usuário" para criar seu acesso.`);
+        return;
       } else {
         const res = registerUser(
           displayName || clean.split('@')[0].replace('.', ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
@@ -187,6 +206,13 @@ export const AuthGatewayPage: React.FC<AuthGatewayPageProps> = ({
           setGoogleError(res.message || 'Erro ao cadastrar conta.');
           return;
         }
+      }
+      try {
+        if (rememberMe) {
+          localStorage.setItem('cardapiopro_remembered_email_v1', clean);
+        }
+      } catch {
+        // ignore storage errors
       }
       setIsGoogleLoading(false);
       setGoogleModalOpen(false);
@@ -476,7 +502,7 @@ export const AuthGatewayPage: React.FC<AuthGatewayPageProps> = ({
                         onChange={(e) => setRememberMe(e.target.checked)}
                         className="rounded text-amber-600 focus:ring-amber-500 border-neutral-300"
                       />
-                      <span>Lembrar meu acesso neste navegador</span>
+                      <span>Lembrar meu e-mail neste navegador</span>
                     </label>
                   </div>
 

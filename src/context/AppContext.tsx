@@ -373,7 +373,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_CURRENT_USER);
+      // Clear any legacy persistent localStorage session so closing/reopening the app always requires login
+      localStorage.removeItem(STORAGE_CURRENT_USER);
+      if (sessionStorage.getItem('cardapiopro_logged_out_v3') === 'true') {
+        return null;
+      }
+      const saved = sessionStorage.getItem(STORAGE_CURRENT_USER);
       if (saved) {
         const parsed: User = JSON.parse(saved);
         if (parsed.email.toLowerCase() === 'wesley.moreira@comunidadecancaonova.com') {
@@ -381,10 +386,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         return parsed;
       }
-      // By default, initialize as Administrador MASTER (Wesley Moreira) with full permissions
-      return INITIAL_USERS[0];
+      return null;
     } catch {
-      return INITIAL_USERS[0];
+      return null;
     }
   });
 
@@ -449,15 +453,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     try {
+      localStorage.removeItem(STORAGE_CURRENT_USER);
       if (currentUser) {
-        localStorage.setItem(STORAGE_CURRENT_USER, JSON.stringify(currentUser));
+        sessionStorage.setItem(STORAGE_CURRENT_USER, JSON.stringify(currentUser));
       } else {
-        localStorage.removeItem(STORAGE_CURRENT_USER);
+        sessionStorage.removeItem(STORAGE_CURRENT_USER);
       }
     } catch (e) {
       console.error(e);
     }
   }, [currentUser]);
+
+  // Background refresh of external Google Sheet / Apps Script users on mount if configured
+  useEffect(() => {
+    if (appsScriptUrl) {
+      void pullUsersFromAppsScript(appsScriptUrl);
+    } else if (externalSheetUrl) {
+      void syncExternalDatabase(externalSheetUrl);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     try {
@@ -621,7 +636,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       try {
         localStorage.removeItem('cardapiopro_logged_out_v3');
-        localStorage.setItem(STORAGE_CURRENT_USER, JSON.stringify(authRes.user));
+        localStorage.removeItem(STORAGE_CURRENT_USER);
+        sessionStorage.removeItem('cardapiopro_logged_out_v3');
+        sessionStorage.setItem(STORAGE_CURRENT_USER, JSON.stringify(authRes.user));
       } catch (e) {
         console.error(e);
       }
@@ -661,7 +678,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     try {
       localStorage.removeItem('cardapiopro_logged_out_v3');
-      localStorage.setItem(STORAGE_CURRENT_USER, JSON.stringify(updatedUser));
+      localStorage.removeItem(STORAGE_CURRENT_USER);
+      sessionStorage.removeItem('cardapiopro_logged_out_v3');
+      sessionStorage.setItem(STORAGE_CURRENT_USER, JSON.stringify(updatedUser));
     } catch (e) {
       console.error(e);
     }
@@ -711,7 +730,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     try {
       localStorage.removeItem('cardapiopro_logged_out_v3');
-      localStorage.setItem(STORAGE_CURRENT_USER, JSON.stringify(newUser));
+      localStorage.removeItem(STORAGE_CURRENT_USER);
+      sessionStorage.removeItem('cardapiopro_logged_out_v3');
+      sessionStorage.setItem(STORAGE_CURRENT_USER, JSON.stringify(newUser));
     } catch (e) {
       console.error(e);
     }
@@ -727,6 +748,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       localStorage.setItem('cardapiopro_logged_out_v3', 'true');
       localStorage.removeItem(STORAGE_CURRENT_USER);
+      sessionStorage.setItem('cardapiopro_logged_out_v3', 'true');
+      sessionStorage.removeItem(STORAGE_CURRENT_USER);
     } catch (e) {
       console.error(e);
     }
@@ -741,7 +764,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         : user;
       try {
         localStorage.removeItem('cardapiopro_logged_out_v3');
-        localStorage.setItem(STORAGE_CURRENT_USER, JSON.stringify(assignedUser));
+        localStorage.removeItem(STORAGE_CURRENT_USER);
+        sessionStorage.removeItem('cardapiopro_logged_out_v3');
+        sessionStorage.setItem(STORAGE_CURRENT_USER, JSON.stringify(assignedUser));
       } catch (e) {
         console.error(e);
       }
