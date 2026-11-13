@@ -314,11 +314,11 @@ var RETENTION_DIFF_DAYS = 7;
 var HEADERS = {
   Usuarios: ['ID', 'Nome', 'Email', 'Senha', 'Setor', 'Perfil', 'Ativo', 'UltimoAcesso'],
   Pedidos_Rampa: [
-    'ID_Pedido', 'Numero_Pedido', 'Data_Criacao', 'Cliente', 'Email',
+    'ID_Pedido', 'Numero_Pedido', 'Data_Criacao', 'Expiracao_8_Dias', 'Cliente', 'Email',
     'Setor_Grupo', 'Dia_Semana', 'Data_Servico', 'Turno', 'Total_Pessoas',
     'Arroz_Pessoas', 'Feijao_Pessoas', 'Prato_Principal_Pessoas',
     'Guarnicao_Pessoas', 'Salada_Pessoas', 'Frutas_Solicitadas',
-    'Observacoes', 'Status', 'Expiracao_8_Dias'
+    'Observacoes', 'Status'
   ],
   Cardapio_Semanal: [
     'Ano', 'Mes', 'Semana', 'Periodo', 'Tipo_Cardapio',
@@ -376,12 +376,8 @@ function setupPlanilhaCardapioPro() {
         .setFontColor('#ffffff')
         .setFontWeight('bold');
       sheet.setFrozenRows(1);
-    } else if (tabName === SHEET_NAMES.PEDIDOS && sheet.getLastColumn() < cols.length) {
-      sheet.getRange(1, 1, 1, cols.length).setValues([cols]);
-      sheet.getRange(1, 1, 1, cols.length)
-        .setBackground('#065f46')
-        .setFontColor('#ffffff')
-        .setFontWeight('bold');
+    } else if (tabName === SHEET_NAMES.PEDIDOS) {
+      garantirColunaExpiracaoPedidos_(sheet);
     }
   });
 
@@ -746,6 +742,7 @@ function formatOrderRow_(order) {
     order.id || '',
     order.orderNumber || '',
     order.orderDate || order.createdAt || '',
+    expiracaoBr,
     order.clientName || '',
     order.clientEmail || '',
     order.departmentOrGroup || '',
@@ -760,9 +757,45 @@ function formatOrderRow_(order) {
     countCat(['salada']),
     frutasTxt,
     order.specialDietNotes || '',
-    order.status || 'solicitado',
-    expiracaoBr
+    order.status || 'solicitado'
   ];
+}
+
+function garantirColunaExpiracaoPedidos_(sheet) {
+  if (!sheet || sheet.getLastRow() === 0) return;
+  var headerRow = sheet.getRange(1, 1, 1, Math.max(1, sheet.getLastColumn())).getValues()[0];
+  var headersLower = headerRow.map(function (h) { return String(h).toLowerCase().trim(); });
+  var idxExp = findCol_(headersLower, ['expiracao_8_dias', 'auto_exclusao']);
+  if (idxExp === -1) {
+    // Insere coluna Expiracao_8_Dias logo apos Data_Criacao (Coluna D / 4)
+    sheet.insertColumnAfter(3);
+    sheet.getRange(1, 4).setValue('Expiracao_8_Dias')
+      .setBackground('#065f46')
+      .setFontColor('#ffffff')
+      .setFontWeight('bold');
+    idxExp = 3;
+  }
+
+  // Preenche automaticamente linhas existentes que ainda nao possuem o prazo calculado
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    var allData = sheet.getDataRange().getValues();
+    var hLower = allData[0].map(function (h) { return String(h).toLowerCase().trim(); });
+    var idxCriacao = findCol_(hLower, ['data_criacao', 'data_solicitacao', 'created']);
+    if (idxCriacao === -1) idxCriacao = 2;
+    var idxServico = findCol_(hLower, ['data_servico', 'data_refeicao']);
+    if (idxServico === -1) idxServico = 8;
+
+    for (var r = 1; r < allData.length; r++) {
+      var atual = String(allData[r][idxExp] || '').trim();
+      if (!atual) {
+        var refD = parseDataPedido_(allData[r][idxCriacao]) || parseDataPedido_(allData[r][idxServico]);
+        if (refD) {
+          sheet.getRange(r + 1, idxExp + 1).setValue(calcularExpiracao8DiasBr_(refD));
+        }
+      }
+    }
+  }
 }
 
 function upsertOrderRow_(ss, order) {
@@ -842,11 +875,11 @@ function limparPedidosAntigos_(ss) {
   var idxCriacao = findCol_(headers, ['data_criacao', 'data_solicitacao', 'created']);
   if (idxCriacao === -1) idxCriacao = 2;
   var idxServico = findCol_(headers, ['data_servico', 'data_refeicao']);
-  if (idxServico === -1) idxServico = 7;
+  if (idxServico === -1) idxServico = 8;
   var idxNumero = findCol_(headers, ['numero_pedido', 'protocolo']);
   if (idxNumero === -1) idxNumero = 1;
   var idxCliente = findCol_(headers, ['cliente', 'usuario']);
-  if (idxCliente === -1) idxCliente = 3;
+  if (idxCliente === -1) idxCliente = 4;
 
   var expiredRows = [];
   for (var i = 1; i < data.length; i++) {

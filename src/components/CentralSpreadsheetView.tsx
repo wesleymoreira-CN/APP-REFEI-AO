@@ -518,6 +518,57 @@ export const CentralSpreadsheetView: React.FC = () => {
         </div>
       )}
 
+      {/* Always-visible 8-Day Order Retention Quick Bar across all spreadsheet tabs */}
+      <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/80 rounded-2xl px-4 py-2.5 flex flex-col md:flex-row md:items-center justify-between gap-2.5 text-xs">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-200/80 dark:bg-amber-900/70 text-amber-950 dark:text-amber-200">
+            <Clock className="w-3.5 h-3.5" />
+            <span>Regra 8º Dia (Pedidos): {autoPurge8Days ? 'Ativa' : 'Pausada'}</span>
+          </span>
+          <span className="text-[11px] text-amber-900 dark:text-amber-200/90">
+            Primeiro pedido é apagado automaticamente no 8º dia (ex.: <strong>08/10</strong> → apaga em <strong>15/10</strong>).
+            {nextExpiringOrder && (
+              <>
+                {' '}Próximo: <strong className="font-mono">{nextExpiringOrder.order.orderNumber}</strong> ({nextExpiringOrder.info.statusLabel}).
+              </>
+            )}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          {activeTab !== 'pedidos' && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('pedidos')}
+              className="px-2.5 py-1 bg-white dark:bg-neutral-900 hover:bg-amber-100 dark:hover:bg-neutral-800 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-bold text-[11px] rounded-lg cursor-pointer transition-colors"
+            >
+              Ver Pedidos & Retenção (8º dia)
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                const res = runOrderRetentionPurge({ force: true });
+                setActiveTab('pedidos');
+                setSyncToast({
+                  type: 'success',
+                  text:
+                    res.removedCount > 0
+                      ? `${res.removedCount} pedido(s) que atingiram 8 dias apagado(s): ${res.removedOrders.map((o) => o.orderNumber).join(', ')}.`
+                      : 'Verificação concluída: nenhum pedido atingiu o 8º dia até hoje.',
+                });
+                setTimeout(() => setSyncToast(null), 5000);
+              }}
+              className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>Limpar 8+ Dias Agora</span>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Synchronized Week & Month Selector inside the Spreadsheet */}
       <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-3 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs transition-colors">
         <div className="flex items-center gap-3 flex-wrap">
@@ -593,7 +644,7 @@ export const CentralSpreadsheetView: React.FC = () => {
         {[
           { key: 'grade_cardapio', label: '1. Grade Semanal (Igual ao App)', icon: '📋', badge: 'Matriz Viva' },
           { key: 'grade_producao', label: '2. Fichas de Produção (Cozinha)', icon: '⚖️', badge: 'kg / L / un' },
-          { key: 'pedidos', label: '3. Pedidos dos Usuários (Quantidades)', icon: '📦', count: spreadsheet.sheets.pedidos?.totalRows || 0, badge: 'Clientes & Setores' },
+          { key: 'pedidos', label: '3. Pedidos dos Usuários (Quantidades)', icon: '📦', count: spreadsheet.sheets.pedidos?.totalRows || 0, badge: 'Auto-Exclusão 8d' },
           { key: 'amostras', label: '4. Amostras RDC 216', icon: '🏷️', count: spreadsheet.sheets.amostras.totalRows },
           { key: 'pratos', label: '5. Banco de Pratos', icon: '🍲', count: spreadsheet.sheets.pratos.totalRows },
           { key: 'usuarios', label: '6. Usuários & Permissões', icon: '👥', count: spreadsheet.sheets.usuarios.totalRows },

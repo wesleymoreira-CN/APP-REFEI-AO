@@ -9,6 +9,7 @@ import {
   getGoogleSheetsTemplateTsv,
   generateGoogleAppsScriptCode,
   validateAppsScriptEndpoint,
+  triggerAppsScriptCleanup,
 } from '../services/externalDatabaseService';
 import { 
   FileSpreadsheet, 
@@ -26,7 +27,9 @@ import {
   Zap,
   Download,
   ArrowUpDown,
-  Link2
+  Link2,
+  Clock,
+  Trash2
 } from 'lucide-react';
 
 interface GoogleSheetsDatabaseModalProps {
@@ -306,11 +309,18 @@ export const GoogleSheetsDatabaseModal: React.FC<GoogleSheetsDatabaseModalProps>
                 <p className="text-neutral-700 dark:text-neutral-300 leading-relaxed">
                   Ao conectar a URL do seu <strong>Google Apps Script Web App</strong>, sua planilha no Google Drive passa a atuar como banco de dados completo com 5 abas criadas automaticamente:{' '}
                   <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">Usuarios</span>,{' '}
-                  <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">Pedidos_Rampa</span>,{' '}
+                  <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">Pedidos_Rampa</span> (com coluna{' '}
+                  <span className="font-mono font-bold text-amber-700 dark:text-amber-300">Expiracao_8_Dias</span>),{' '}
                   <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">Cardapio_Semanal</span>,{' '}
                   <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">Producao_Cozinha</span> e{' '}
                   <span className="font-mono font-bold text-emerald-800 dark:text-emerald-300">Auditoria</span>.
                 </p>
+                <div className="pt-1 flex items-start gap-2 text-[11px] text-amber-900 dark:text-amber-200 bg-amber-100/70 dark:bg-amber-950/50 border border-amber-300/70 dark:border-amber-800/70 rounded-xl p-2.5">
+                  <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Auto-Exclusão no 8º Dia no Google Sheets:</strong> Se você já tinha o script colado antes, copie novamente o <strong>Code.gs (aba 2)</strong>, cole no editor do Apps Script, salve e clique em <strong>Implantar &gt; Gerenciar implantações</strong> (ou no menu <strong>CardapioPro &gt; Ativar Limpeza Automatica Diaria (8 dias)</strong> dentro da planilha).
+                  </span>
+                </div>
               </div>
 
               {/* URL Input & Action Buttons */}
@@ -356,7 +366,32 @@ export const GoogleSheetsDatabaseModal: React.FC<GoogleSheetsDatabaseModalProps>
                     className="px-4 py-2.5 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-700 font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all shrink-0 disabled:opacity-50"
                   >
                     <Users className="w-4 h-4 text-emerald-600" />
-                    <span>Ler Apenas Usuários (GET)</span>
+                    <span>Ler Usuários (GET)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setFeedbackMsg(null);
+                      const check = validateAppsScriptEndpoint(scriptUrlInput);
+                      if (!check.valid) {
+                        setFeedbackMsg({
+                          type: 'error',
+                          text: check.error || 'Informe a URL /exec do Apps Script primeiro.',
+                        });
+                        return;
+                      }
+                      const res = await triggerAppsScriptCleanup(check.cleanUrl);
+                      setFeedbackMsg({
+                        type: res.success ? 'success' : 'error',
+                        text: res.message || (res.success ? 'Limpeza de 8+ dias executada na planilha!' : 'Não foi possível executar a limpeza. Verifique se o Code.gs atualizado foi implantado.'),
+                      });
+                    }}
+                    disabled={isSyncingDatabase}
+                    className="px-3.5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-all shrink-0 disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Limpar 8+ Dias no Sheets</span>
                   </button>
                 </div>
 

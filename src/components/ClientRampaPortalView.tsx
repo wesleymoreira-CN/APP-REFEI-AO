@@ -10,6 +10,7 @@ import { normalizeSlotItems, getWeekDates } from '../utils/validators';
 import { CANONICAL_FRUITS, AvailableFruit } from '../data/clientOrdersData';
 import { triggerDirectPrint } from '../utils/printHelper';
 import { exportElementToPdf } from '../utils/pdfHelper';
+import { getOrderRetentionInfo } from '../utils/orderRetention';
 import { 
   Soup, 
   Calendar, 
@@ -32,7 +33,8 @@ import {
   Crown,
   ReceiptText,
   Info,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Clock
 } from 'lucide-react';
 
 interface ClientRampaPortalViewProps {
@@ -1453,6 +1455,13 @@ export const ClientRampaPortalView: React.FC<ClientRampaPortalViewProps> = ({
             </button>
           </div>
 
+          <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/70 text-xs flex items-center gap-2.5 text-amber-900 dark:text-amber-200">
+            <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>
+              <strong>Regra Automática da Planilha (8 dias):</strong> Cada pedido permanece salvo por 7 dias e é apagado automaticamente no <strong>8º dia</strong> (ex.: pedido feito dia <strong>08/10</strong> é apagado em <strong>15/10</strong>).
+            </span>
+          </div>
+
           {visibleOrders.length === 0 ? (
             <div className="py-12 text-center space-y-3">
               <FileText className="w-10 h-10 text-neutral-400 mx-auto" />
@@ -1489,6 +1498,9 @@ export const ClientRampaPortalView: React.FC<ClientRampaPortalViewProps> = ({
                           </h4>
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${statusColors[order.status]}`}>
                             {order.status.replace('_', ' ')}
+                          </span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-mono">
+                            8º dia: {getOrderRetentionInfo(order).expirationDateBr}
                           </span>
                         </div>
 
