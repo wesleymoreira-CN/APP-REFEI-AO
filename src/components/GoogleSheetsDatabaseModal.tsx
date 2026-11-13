@@ -367,7 +367,7 @@ export const GoogleSheetsDatabaseModal: React.FC<GoogleSheetsDatabaseModalProps>
                     className="px-4 py-2.5 bg-white dark:bg-neutral-900 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-700 font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all shrink-0 disabled:opacity-50"
                   >
                     <Users className="w-4 h-4 text-emerald-600" />
-                    <span>Ler Usuários (GET)</span>
+                    <span>Atualizar da Planilha (GET)</span>
                   </button>
 
                   <button

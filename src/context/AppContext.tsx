@@ -45,6 +45,7 @@ import {
   syncUsersFromExternalSheet,
   authenticateUserWithSheet,
   fetchUsersViaAppsScript,
+  fetchFullDataViaAppsScript,
   pushFullSyncToAppsScript,
   pushSingleOrderToAppsScript,
   pushSingleUserToAppsScript,
@@ -296,11 +297,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const urlToUse = customUrl !== undefined ? customUrl : appsScriptUrl;
     setIsSyncingDatabase(true);
     try {
-      const result = await fetchUsersViaAppsScript(urlToUse);
-      if (result.success && result.users.length > 0) {
-        setUsers(result.users);
+      const fullRes = await fetchFullDataViaAppsScript(urlToUse, clientOrders);
+      if (fullRes.success) {
+        if (fullRes.users.length > 0) {
+          setUsers(fullRes.users);
+          try {
+            localStorage.setItem(STORAGE_USERS, JSON.stringify(fullRes.users));
+          } catch (e) {
+            console.error(e);
+          }
+        }
+        if (fullRes.orders.length > 0) {
+          setClientOrders((prev) => {
+            const sheetOrderIds = new Set(fullRes.orders.map((o) => o.id));
+            const nowMs = Date.now();
+            const recentLocalOnly = prev.filter((o) => {
+              if (sheetOrderIds.has(o.id)) return false;
+              const createdMs = new Date(o.createdAt || '').getTime();
+              return !isNaN(createdMs) && nowMs - createdMs < 60000;
+            });
+            const merged = [...recentLocalOnly, ...fullRes.orders];
+            return autoPurge8Days ? splitExpiredOrders(merged).activeOrders : merged;
+          });
+        }
+        const now = new Date().toISOString();
+        setLastDatabaseSync(now);
+        setLastAppsScriptSync(now);
+        return {
+          success: true,
+          users: fullRes.users,
+          count: fullRes.users.length,
+          sheetName: fullRes.sheetName,
+          message: fullRes.message,
+        };
+      }
+
+      const fallbackUsers = await fetchUsersViaAppsScript(urlToUse);
+      if (fallbackUsers.success && fallbackUsers.users.length > 0) {
+        setUsers(fallbackUsers.users);
         try {
-          localStorage.setItem(STORAGE_USERS, JSON.stringify(result.users));
+          localStorage.setItem(STORAGE_USERS, JSON.stringify(fallbackUsers.users));
         } catch (e) {
           console.error(e);
         }
@@ -308,7 +344,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setLastDatabaseSync(now);
         setLastAppsScriptSync(now);
       }
-      return result;
+      return fallbackUsers;
     } finally {
       setIsSyncingDatabase(false);
     }
@@ -327,14 +363,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return pushRes;
       }
 
-      // After pushing, pull latest users from the spreadsheet so edits made in Google Sheets reflect immediately
-      const pullRes = await fetchUsersViaAppsScript(urlToUse);
-      if (pullRes.success && pullRes.users.length > 0) {
-        setUsers(pullRes.users);
-        try {
-          localStorage.setItem(STORAGE_USERS, JSON.stringify(pullRes.users));
-        } catch (e) {
-          console.error(e);
+      // After pushing, pull latest users & orders from Google Sheets so APK/web stay 100% aligned
+      const pullRes = await fetchFullDataViaAppsScript(urlToUse, clientOrders);
+      if (pullRes.success) {
+        if (pullRes.users.length > 0) {
+          setUsers(pullRes.users);
+          try {
+            localStorage.setItem(STORAGE_USERS, JSON.stringify(pullRes.users));
+          } catch (e) {
+            console.error(e);
+          }
+        }
+        if (pullRes.orders.length > 0) {
+          setClientOrders(autoPurge8Days ? splitExpiredOrders(pullRes.orders).activeOrders : pullRes.orders);
         }
       }
 
@@ -348,7 +389,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       return {
         success: true,
-        message: `${pushRes.message}${pullRes.success ? ` (${pullRes.count} usuários atualizados)` : ''}`,
+        message: `${pushRes.message}${pullRes.success ? ` (${pullRes.users.length} usuários e ${pullRes.orders.length} pedidos atualizados)` : ''}`,
       };
     } finally {
       setIsSyncingDatabase(false);
@@ -501,15 +542,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [currentUser]);
 
-  // Background refresh of external Google Sheet / Apps Script users on mount if configured
+  // Background refresh of external Google Sheet / Apps Script (users + orders) on mount, resume, focus, reconnect, and every 30s for APK/Netlify sync
   useEffect(() => {
-    if (appsScriptUrl) {
-      void pullUsersFromAppsScript(appsScriptUrl);
-    } else if (externalSheetUrl) {
-      void syncExternalDatabase(externalSheetUrl);
-    }
+    if (!appsScriptUrl && !externalSheetUrl) return;
+
+    let lastPullAt = 0;
+    const runPull = (force = false) => {
+      const nowMs = Date.now();
+      if (!force && nowMs - lastPullAt < 5000) return;
+      lastPullAt = nowMs;
+
+      if (appsScriptUrl) {
+        void pullUsersFromAppsScript(appsScriptUrl);
+      } else if (externalSheetUrl) {
+        void syncExternalDatabase(externalSheetUrl);
+      }
+    };
+
+    runPull(true);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        runPull(false);
+      }
+    };
+    const handleFocusOrOnline = () => runPull(false);
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocusOrOnline);
+    window.addEventListener('online', handleFocusOrOnline);
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        runPull(true);
+      }
+    }, 30000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocusOrOnline);
+      window.removeEventListener('online', handleFocusOrOnline);
+      window.clearInterval(intervalId);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [appsScriptUrl, externalSheetUrl]);
 
   useEffect(() => {
     try {

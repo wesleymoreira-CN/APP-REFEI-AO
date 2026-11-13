@@ -236,12 +236,69 @@ function detectDirectGoogleHtmlError(bodyText: string, finalUrl: string, status:
   return null;
 }
 
+function fetchJsonpFromAppsScript(targetUrl: string, timeoutMs = 12000): Promise<{ ok: boolean; text?: string; message?: string }> {
+  if (typeof document === 'undefined' || typeof window === 'undefined') {
+    return Promise.resolve({ ok: false, message: 'JSONP indisponível fora do navegador.' });
+  }
+
+  return new Promise((resolve) => {
+    const cbName = `__cardapioProJsonp_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+    const win = window as unknown as Record<string, unknown>;
+    const script = document.createElement('script');
+    let settled = false;
+
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      try {
+        delete win[cbName];
+      } catch {
+        win[cbName] = undefined;
+      }
+      if (script.parentNode) {
+        script.parentNode.removeChild(script);
+      }
+    };
+
+    const timer = window.setTimeout(() => {
+      cleanup();
+      resolve({ ok: false, message: 'Tempo esgotado na leitura direta do Google Apps Script.' });
+    }, timeoutMs);
+
+    win[cbName] = (data: unknown) => {
+      window.clearTimeout(timer);
+      cleanup();
+      resolve({ ok: true, text: JSON.stringify(data) });
+    };
+
+    script.onerror = () => {
+      window.clearTimeout(timer);
+      cleanup();
+      resolve({ ok: false, message: 'Falha ao carregar resposta via script (JSONP) do Apps Script.' });
+    };
+
+    const sep = targetUrl.includes('?') ? '&' : '?';
+    script.src = `${targetUrl}${sep}callback=${encodeURIComponent(cbName)}&_nocache=${Date.now()}`;
+    script.async = true;
+    document.head.appendChild(script);
+  });
+}
+
 async function proxyGoogleRequest(
   targetUrl: string,
   method: 'GET' | 'POST',
   payload?: unknown
 ): Promise<{ ok: boolean; text?: string; message?: string }> {
-  const proxyCandidates: string[] = ['/api/sheets-proxy', '/.netlify/functions/sheets-proxy'];
+  const isLocalNativeOrigin =
+    typeof window !== 'undefined' &&
+    (window.location.protocol === 'file:' ||
+      window.location.protocol === 'capacitor:' ||
+      window.location.hostname === 'appassets.androidplatform.net');
+
+  const proxyCandidates: string[] = [];
+  if (!isLocalNativeOrigin) {
+    proxyCandidates.push('/api/sheets-proxy', '/.netlify/functions/sheets-proxy');
+  }
   const customProxy = getSafeEnvVar('VITE_SHEETS_PROXY_URL');
   if (customProxy) {
     proxyCandidates.push(customProxy);
@@ -255,11 +312,12 @@ async function proxyGoogleRequest(
     // ignore storage errors
   }
 
-  // 1. Try server-side proxy endpoints (/api/sheets-proxy, /.netlify/functions/sheets-proxy, or configured VITE_SHEETS_PROXY_URL)
+  // 1. Try server-side proxy endpoints (/api/sheets-proxy, /.netlify/functions/sheets-proxy, or VITE_SHEETS_PROXY_URL)
   for (const proxyEndpoint of proxyCandidates) {
     try {
       const proxyRes = await fetch(proxyEndpoint, {
         method: 'POST',
+        cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: targetUrl, method, payload }),
       });
@@ -272,7 +330,7 @@ async function proxyGoogleRequest(
       const rawText = await proxyRes.text();
       const trimmed = rawText.trim().toLowerCase();
 
-      // Skip Netlify SPA HTML fallbacks (/* -> /index.html returning 200 text/html)
+      // Skip Netlify/SPA HTML fallbacks (/* -> /index.html returning 200 text/html)
       if (!contentType.includes('application/json') && (trimmed.startsWith('<!doctype') || trimmed.startsWith('<html'))) {
         continue;
       }
@@ -282,11 +340,11 @@ async function proxyGoogleRequest(
         return proxyData;
       }
     } catch {
-      // Try next proxy candidate or fall through to direct browser fetch
+      // Try next proxy candidate or fall through to direct browser/APK fetch
     }
   }
 
-  // 2. Fallback: Direct browser fetch (CORS-safe, omitting credentials & preflight headers)
+  // 2. Fallback: Direct browser / Android WebView fetch (no-store prevents APK HTTP caching)
   const normalizedTarget = normalizeAppsScriptEndpointUrl(targetUrl);
   const directOptions: RequestInit =
     method === 'POST'
@@ -294,6 +352,7 @@ async function proxyGoogleRequest(
           method: 'POST',
           mode: 'cors',
           credentials: 'omit',
+          cache: 'no-store',
           redirect: 'follow',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify(payload ?? {}),
@@ -302,43 +361,82 @@ async function proxyGoogleRequest(
           method: 'GET',
           mode: 'cors',
           credentials: 'omit',
+          cache: 'no-store',
           redirect: 'follow',
         };
 
-  let directRes = await fetch(normalizedTarget, directOptions);
-  let text = await directRes.text();
-  let htmlErr = detectDirectGoogleHtmlError(text, directRes.url, directRes.status);
+  try {
+    let directRes = await fetch(normalizedTarget, directOptions);
+    let text = await directRes.text();
+    let htmlErr = detectDirectGoogleHtmlError(text, directRes.url, directRes.status);
 
-  if ((htmlErr || !directRes.ok) && normalizedTarget !== targetUrl) {
-    try {
-      const retryRes = await fetch(targetUrl, directOptions);
-      const retryText = await retryRes.text();
-      const retryHtmlErr = detectDirectGoogleHtmlError(retryText, retryRes.url, retryRes.status);
-      if (retryRes.ok && !retryHtmlErr) {
-        directRes = retryRes;
-        text = retryText;
-        htmlErr = null;
+    if ((htmlErr || !directRes.ok) && normalizedTarget !== targetUrl) {
+      try {
+        const retryRes = await fetch(targetUrl, directOptions);
+        const retryText = await retryRes.text();
+        const retryHtmlErr = detectDirectGoogleHtmlError(retryText, retryRes.url, retryRes.status);
+        if (retryRes.ok && !retryHtmlErr) {
+          directRes = retryRes;
+          text = retryText;
+          htmlErr = null;
+        }
+      } catch {
+        // keep initial result
       }
-    } catch {
-      // keep initial result
     }
-  }
 
-  if (htmlErr) {
-    return {
-      ok: false,
-      message: htmlErr,
-    };
-  }
+    if (htmlErr) {
+      if (method === 'GET' && isAppsScriptUrl(normalizedTarget)) {
+        const jsonpRes = await fetchJsonpFromAppsScript(normalizedTarget);
+        if (jsonpRes.ok) return jsonpRes;
+      }
+      return { ok: false, message: htmlErr };
+    }
 
-  if (!directRes.ok) {
-    return {
-      ok: false,
-      message: `HTTP ${directRes.status}: Verifique se a implantação está publicada para "Qualquer pessoa" ("Anyone").`,
-    };
-  }
+    if (!directRes.ok) {
+      if (method === 'GET' && isAppsScriptUrl(normalizedTarget)) {
+        const jsonpRes = await fetchJsonpFromAppsScript(normalizedTarget);
+        if (jsonpRes.ok) return jsonpRes;
+      }
+      return {
+        ok: false,
+        message: `HTTP ${directRes.status}: Verifique se a implantação está publicada para "Qualquer pessoa" ("Anyone").`,
+      };
+    }
 
-  return { ok: true, text };
+    return { ok: true, text };
+  } catch (directErr) {
+    // 3. APK / WebView CORS fallback when direct fetch fails on 302 redirect (e.g. file:// or capacitor://localhost)
+    if (method === 'GET' && isAppsScriptUrl(normalizedTarget)) {
+      const jsonpRes = await fetchJsonpFromAppsScript(normalizedTarget);
+      if (jsonpRes.ok) return jsonpRes;
+    }
+
+    if (method === 'POST' && isAppsScriptUrl(normalizedTarget)) {
+      try {
+        await fetch(normalizedTarget, {
+          method: 'POST',
+          mode: 'no-cors',
+          credentials: 'omit',
+          cache: 'no-store',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload ?? {}),
+        });
+        return {
+          ok: true,
+          text: JSON.stringify({
+            ok: true,
+            opaqueMobileWrite: true,
+            message: 'Dados enviados diretamente do app/APK para a planilha Google Sheets.',
+          }),
+        };
+      } catch {
+        // fall through to throw original error
+      }
+    }
+
+    throw directErr;
+  }
 }
 
 /**
@@ -596,15 +694,22 @@ function instalarGatilhoLimpezaDiaria() {
   }
 }
 
-function jsonResponse(obj) {
+function jsonResponse(obj, callbackName) {
+  var jsonStr = JSON.stringify(obj);
+  if (callbackName && /^[a-zA-Z0-9_.$]+$/.test(callbackName)) {
+    return ContentService
+      .createTextOutput(callbackName + '(' + jsonStr + ');')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
   return ContentService
-    .createTextOutput(JSON.stringify(obj))
+    .createTextOutput(jsonStr)
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// Endpoint GET: Leitura em tempo real de usuarios e verificacao de conexao
+// Endpoint GET: Leitura em tempo real de usuarios, pedidos, cardapio e limpeza 8 dias
 // Exemplos: ?action=ping | ?action=getUsers | ?action=syncAll | ?action=cleanupOrders
 function doGet(e) {
+  var cb = (e && e.parameter && e.parameter.callback) ? String(e.parameter.callback).trim() : '';
   try {
     var action = (e && e.parameter && e.parameter.action) ? String(e.parameter.action) : 'getUsers';
     var ss = setupPlanilhaCardapioPro();
@@ -618,7 +723,7 @@ function doGet(e) {
         sheetId: ss.getId(),
         cleanup: cleanup,
         timestamp: new Date().toISOString()
-      });
+      }, cb);
     }
 
     if (action === 'cleanupOrders') {
@@ -627,26 +732,28 @@ function doGet(e) {
         sheetName: ss.getName(),
         cleanup: cleanup,
         syncedAt: new Date().toISOString()
-      });
+      }, cb);
     }
 
     if (action === 'getUsers' || action === 'syncAll') {
       var users = readUsersFromSheet_(ss);
       var orders = action === 'syncAll' ? readRowsAsObjects_(ss.getSheetByName(SHEET_NAMES.PEDIDOS)) : [];
+      var menus = action === 'syncAll' ? readRowsAsObjects_(ss.getSheetByName(SHEET_NAMES.CARDAPIO)) : [];
       return jsonResponse({
         ok: true,
         sheetName: ss.getName(),
         users: users,
         orders: orders,
+        menus: menus,
         cleanup: cleanup,
         count: users.length,
         syncedAt: new Date().toISOString()
-      });
+      }, cb);
     }
 
-    return jsonResponse({ ok: false, message: 'Acao GET desconhecida: ' + action });
+    return jsonResponse({ ok: false, message: 'Acao GET desconhecida: ' + action }, cb);
   } catch (err) {
-    return jsonResponse({ ok: false, message: err.toString() });
+    return jsonResponse({ ok: false, message: err.toString() }, cb);
   }
 }
 
@@ -1202,6 +1309,218 @@ export async function fetchUsersViaAppsScript(scriptUrl: string): Promise<{
       success: false,
       users: [],
       count: 0,
+      message: formatFriendlyFetchError(err, 'Google Apps Script'),
+    };
+  }
+}
+
+function normalizeSheetDateString(rawVal: unknown): string {
+  if (!rawVal) return '';
+  if (rawVal instanceof Date && !isNaN(rawVal.getTime())) {
+    const dd = String(rawVal.getDate()).padStart(2, '0');
+    const mm = String(rawVal.getMonth() + 1).padStart(2, '0');
+    return `${dd}/${mm}/${rawVal.getFullYear()}`;
+  }
+  const s = String(rawVal).trim();
+  const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
+  return s;
+}
+
+function normalizeSheetIsoDate(rawVal: unknown): string {
+  if (!rawVal) return new Date().toISOString().split('T')[0];
+  if (rawVal instanceof Date && !isNaN(rawVal.getTime())) {
+    return rawVal.toISOString().split('T')[0];
+  }
+  const s = String(rawVal).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const brMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (brMatch) {
+    const yr = Number(brMatch[3]) < 100 ? 2000 + Number(brMatch[3]) : Number(brMatch[3]);
+    return `${yr}-${brMatch[2].padStart(2, '0')}-${brMatch[1].padStart(2, '0')}`;
+  }
+  return s;
+}
+
+function normalizeFruitUnit(rawUnit: string): 'un' | 'kg' | 'caixas' | 'porções' | 'fatias' {
+  const u = (rawUnit || '').toLowerCase().trim();
+  if (u === 'kg' || u.startsWith('quilo')) return 'kg';
+  if (u.startsWith('caix')) return 'caixas';
+  if (u.startsWith('fati')) return 'fatias';
+  if (u.startsWith('porc') || u.startsWith('porç')) return 'porções';
+  return 'un';
+}
+
+function parseFruitsString(rawFruits: unknown): ClientRampaOrder['fruits'] {
+  const text = String(rawFruits || '').trim();
+  if (!text || text.toLowerCase().includes('sem frutas')) return [];
+  return text
+    .split(/\s*[|;]\s*/)
+    .map((chunk, idx) => {
+      const m = chunk.match(/^(.+?):\s*([\d.,]+)\s*(.*)$/);
+      if (m) {
+        return {
+          id: `fr-gs-${idx + 1}`,
+          name: m[1].trim(),
+          quantity: Number(m[2].replace(',', '.')) || 0,
+          unit: normalizeFruitUnit(m[3] || 'un'),
+        };
+      }
+      return {
+        id: `fr-gs-${idx + 1}`,
+        name: chunk.trim(),
+        quantity: 1,
+        unit: 'un' as const,
+      };
+    })
+    .filter((f) => Boolean(f.name) && f.quantity > 0);
+}
+
+function normalizeOrderStatusFromSheet(rawStatus: unknown): ClientRampaOrder['status'] {
+  const s = String(rawStatus || '').toLowerCase().trim();
+  if (s.includes('aprov')) return 'aprovado';
+  if (s.includes('prepar')) return 'em_preparo';
+  if (s.includes('entreg')) return 'entregue';
+  return 'solicitado';
+}
+
+export interface AppsScriptFullPullResult {
+  success: boolean;
+  users: (User & { password?: string; active?: boolean })[];
+  orders: ClientRampaOrder[];
+  rawMenuRows: Record<string, unknown>[];
+  sheetName?: string;
+  message: string;
+}
+
+/**
+ * Pulls users, client orders (Pedidos_Rampa), and menu rows (Cardapio_Semanal) via ?action=syncAll
+ * Uses anti-cache timestamps and automatic JSONP fallback for Android APK / WebView compatibility.
+ */
+export async function fetchFullDataViaAppsScript(
+  scriptUrl: string,
+  existingLocalOrders: ClientRampaOrder[] = []
+): Promise<AppsScriptFullPullResult> {
+  const validation = validateAppsScriptEndpoint(scriptUrl);
+  if (!validation.valid) {
+    return {
+      success: false,
+      users: [],
+      orders: [],
+      rawMenuRows: [],
+      message: validation.error || 'URL do Google Apps Script inválida.',
+    };
+  }
+
+  const clean = validation.cleanUrl;
+  const separator = clean.includes('?') ? '&' : '?';
+  const endpoint = `${clean}${separator}action=syncAll&_t=${Date.now()}`;
+
+  try {
+    const proxyResult = await proxyGoogleRequest(endpoint, 'GET');
+    if (!proxyResult.ok || proxyResult.text === undefined) {
+      throw new Error(proxyResult.message || 'O Apps Script não retornou dados.');
+    }
+
+    const data = JSON.parse(proxyResult.text);
+    if (!data || !data.ok) {
+      throw new Error(data?.message || 'Erro ao ler dados completos da planilha.');
+    }
+
+    const rawUsers = Array.isArray(data.users) ? data.users : [];
+    const parsedUsers: (User & { password?: string; active?: boolean })[] = rawUsers
+      .filter((u: any) => u && u.email && String(u.email).includes('@'))
+      .map((u: any, idx: number) => {
+        const email = String(u.email).toLowerCase().trim();
+        return {
+          id: String(u.id || `gs-${idx + 1}-${email.replace(/[^a-zA-Z0-9]/g, '')}`),
+          name: String(u.name || 'Usuário'),
+          email,
+          password: String(u.password || ''),
+          department: String(u.department || 'Canção Nova'),
+          role: normalizeUserRole(email, u.role),
+          active: parseActiveFlag(u.active),
+          source: 'apps_script' as const,
+          createdAt: new Date().toISOString(),
+        };
+      });
+
+    const localById = new Map(existingLocalOrders.map((o) => [o.id, o]));
+    const rawOrders = Array.isArray(data.orders) ? data.orders : [];
+    const parsedOrders: ClientRampaOrder[] = rawOrders
+      .filter((row: any) => row && (row.ID_Pedido || row.Numero_Pedido || row.Cliente))
+      .map((row: any, idx: number) => {
+        const orderId = String(row.ID_Pedido || `gs-ord-${idx + 1}`).trim();
+        const existingLocal = localById.get(orderId);
+        const totalPax = Number(row.Total_Pessoas) || 0;
+        const arrozPax = Number(row.Arroz_Pessoas) || totalPax;
+        const feijaoPax = Number(row.Feijao_Pessoas) || totalPax;
+        const principalPax = Number(row.Prato_Principal_Pessoas) || totalPax;
+        const guarnicaoPax = Number(row.Guarnicao_Pessoas) || totalPax;
+        const saladaPax = Number(row.Salada_Pessoas) || totalPax;
+
+        const mealItems = existingLocal?.mealItems && existingLocal.mealItems.length > 0
+          ? existingLocal.mealItems
+          : [
+              { id: 'arroz', category: 'arroz', categoryLabel: 'Arroz', dishName: 'Arroz do Cardápio', peopleCount: arrozPax, icon: '🍚' },
+              { id: 'feijao', category: 'feijao', categoryLabel: 'Feijão', dishName: 'Feijão do Cardápio', peopleCount: feijaoPax, icon: '🫘' },
+              { id: 'principal', category: 'principal', categoryLabel: 'Prato Principal', dishName: 'Prato Principal', peopleCount: principalPax, icon: '🥩' },
+              { id: 'guarnicao', category: 'guarnicao', categoryLabel: 'Guarnição do Buffet', dishName: 'Guarnição', peopleCount: guarnicaoPax, icon: '🥔' },
+              { id: 'salada', category: 'salada', categoryLabel: 'Salada Fresca', dishName: 'Salada', peopleCount: saladaPax, icon: '🥬' },
+              { id: 'sobremesa', category: 'sobremesa', categoryLabel: 'Frutas ou Sobremesa', dishName: 'Sobremesa', peopleCount: totalPax, icon: '🍮' },
+            ];
+
+        const orderDateIso = normalizeSheetIsoDate(row.Data_Criacao);
+        return {
+          id: orderId,
+          orderNumber: String(row.Numero_Pedido || `PED-RAMPA-${idx + 1}`),
+          clientName: String(row.Cliente || 'Solicitante'),
+          clientEmail: String(row.Email || '').toLowerCase().trim(),
+          clientPhone: existingLocal?.clientPhone,
+          departmentOrGroup: String(row.Setor_Grupo || 'Canção Nova'),
+          orderDate: orderDateIso,
+          serviceDate: normalizeSheetDateString(row.Data_Servico) || orderDateIso,
+          dayName: String(row.Dia_Semana || existingLocal?.dayName || 'Rampa'),
+          mealShift: (row.Turno === 'Jantar' || row.Turno === 'Café' ? row.Turno : 'Almoço') as ClientRampaOrder['mealShift'],
+          numberOfPeople: totalPax,
+          mealItems,
+          fruits: existingLocal?.fruits && existingLocal.fruits.length > 0
+            ? existingLocal.fruits
+            : parseFruitsString(row.Frutas_Solicitadas),
+          specialDietNotes: String(row.Observacoes || '').trim() || undefined,
+          status: normalizeOrderStatusFromSheet(row.Status),
+          createdAt: existingLocal?.createdAt || `${orderDateIso}T09:00:00`,
+        };
+      });
+
+    const rawMenuRows = Array.isArray(data.menus) ? data.menus : [];
+
+    try {
+      if (parsedUsers.length > 0) {
+        localStorage.setItem(EXTERNAL_USERS_CACHE_KEY, JSON.stringify(parsedUsers));
+      }
+      localStorage.setItem(LAST_SYNC_STORAGE_KEY, new Date().toISOString());
+      localStorage.setItem(LAST_APPS_SCRIPT_SYNC_KEY, new Date().toISOString());
+      localStorage.setItem(APPS_SCRIPT_URL_STORAGE_KEY, clean);
+    } catch {
+      // ignore storage quota errors
+    }
+
+    return {
+      success: true,
+      users: parsedUsers,
+      orders: parsedOrders,
+      rawMenuRows,
+      sheetName: data.sheetName,
+      message: `Sincronizado com "${data.sheetName || 'Google Sheets'}": ${parsedUsers.length} usuários e ${parsedOrders.length} pedidos.`,
+    };
+  } catch (err: any) {
+    console.error('Apps Script full GET error:', err);
+    return {
+      success: false,
+      users: [],
+      orders: [],
+      rawMenuRows: [],
       message: formatFriendlyFetchError(err, 'Google Apps Script'),
     };
   }
