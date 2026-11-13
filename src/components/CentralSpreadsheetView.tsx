@@ -33,6 +33,7 @@ import {
   sheetToTsv, 
   sheetToCsv 
 } from '../utils/spreadsheetEngine';
+import { GoogleSheetsDatabaseModal } from './GoogleSheetsDatabaseModal';
 
 export const CentralSpreadsheetView: React.FC = () => {
   const { 
@@ -58,6 +59,9 @@ export const CentralSpreadsheetView: React.FC = () => {
     updateDish,
     isAdmin,
     isMaster,
+    appsScriptUrl,
+    syncAllWithAppsScript,
+    isSyncingDatabase,
   } = useApp();
 
   // Active view tab in spreadsheet:
@@ -109,6 +113,8 @@ export const CentralSpreadsheetView: React.FC = () => {
 
   const [copied, setCopied] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
+  const [appsScriptModalOpen, setAppsScriptModalOpen] = useState(false);
+  const [syncToast, setSyncToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Aggregated orders summary grouped by user to easily view quantities requested by each user
   const userOrderSummaries = React.useMemo(() => {
@@ -426,6 +432,38 @@ export const CentralSpreadsheetView: React.FC = () => {
         <div className="flex items-center gap-2 flex-wrap shrink-0">
           <button
             type="button"
+            onClick={async () => {
+              if (appsScriptUrl) {
+                setSyncToast(null);
+                const res = await syncAllWithAppsScript();
+                setSyncToast({ type: res.success ? 'success' : 'error', text: res.message });
+                setTimeout(() => setSyncToast(null), 5000);
+              } else {
+                setAppsScriptModalOpen(true);
+              }
+            }}
+            disabled={isSyncingDatabase}
+            title={appsScriptUrl ? 'Enviar pedidos, cardápios e usuários para o Google Sheets via Apps Script' : 'Configurar e conectar Google Apps Script com seu Google Sheets'}
+            className="px-3.5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+          >
+            <RefreshCw className={`w-4 h-4 ${isSyncingDatabase ? 'animate-spin' : ''}`} />
+            <span>{appsScriptUrl ? (isSyncingDatabase ? 'Sincronizando...' : 'Sincronizar Apps Script') : 'Conectar Apps Script'}</span>
+          </button>
+
+          {appsScriptUrl && (
+            <button
+              type="button"
+              onClick={() => setAppsScriptModalOpen(true)}
+              title="Abrir configurações e código Code.gs do Apps Script"
+              className="px-3 py-2 text-xs font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 border border-emerald-300 dark:border-emerald-800 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>Configurar Script</span>
+            </button>
+          )}
+
+          <button
+            type="button"
             onClick={handleCopySheets}
             title="Copiar dados tabulados para colar diretamente no Google Sheets (Ctrl+V)"
             className="px-3.5 py-2 text-xs font-bold text-neutral-800 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-700 rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-2xs hover:shadow-xs"
@@ -455,6 +493,19 @@ export const CentralSpreadsheetView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {syncToast && (
+        <div className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between gap-2 ${
+          syncToast.type === 'success'
+            ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-900 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-800'
+            : 'bg-rose-100 dark:bg-rose-950/70 text-rose-900 dark:text-rose-200 border border-rose-300 dark:border-rose-800'
+        }`}>
+          <span>{syncToast.text}</span>
+          <button type="button" onClick={() => setSyncToast(null)} className="cursor-pointer opacity-70 hover:opacity-100">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Synchronized Week & Month Selector inside the Spreadsheet */}
       <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-3 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs transition-colors">
@@ -527,7 +578,7 @@ export const CentralSpreadsheetView: React.FC = () => {
       </div>
 
       {/* Spreadsheet Tabs Selector (Google Sheets style) */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-neutral-200 dark:border-neutral-800 scrollbar-thin">
+      <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar-x pb-2 border-b border-neutral-200 dark:border-neutral-800">
         {[
           { key: 'grade_cardapio', label: '1. Grade Semanal (Igual ao App)', icon: '📋', badge: 'Matriz Viva' },
           { key: 'grade_producao', label: '2. Fichas de Produção (Cozinha)', icon: '⚖️', badge: 'kg / L / un' },
@@ -1585,6 +1636,11 @@ export const CentralSpreadsheetView: React.FC = () => {
           </div>
         </div>
       )}
+
+      <GoogleSheetsDatabaseModal
+        isOpen={appsScriptModalOpen}
+        onClose={() => setAppsScriptModalOpen(false)}
+      />
 
     </div>
   );

@@ -10,13 +10,11 @@ import {
   EyeOff, 
   LogIn, 
   UserPlus, 
-  ArrowRight, 
   CheckCircle2, 
   AlertCircle, 
   ChefHat, 
   Scale, 
   Tag, 
-  Building, 
   User, 
   Sun, 
   Moon, 
@@ -24,7 +22,6 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { isValidCancaoNovaEmail } from '../utils/validators';
-import { UserRole } from '../types';
 
 interface AuthGatewayPageProps {
   initialMode?: 'login' | 'register';
@@ -48,8 +45,6 @@ export const AuthGatewayPage: React.FC<AuthGatewayPageProps> = ({
   // Register Form State
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
-  const [regDepartment, setRegDepartment] = useState('Nutrição & Cardápios');
-  const [regRole, setRegRole] = useState<UserRole>('admin');
   const [regPassword, setRegPassword] = useState('');
   const [regConfirmPassword, setRegConfirmPassword] = useState('');
   const [showRegPassword, setShowRegPassword] = useState(false);
@@ -58,7 +53,6 @@ export const AuthGatewayPage: React.FC<AuthGatewayPageProps> = ({
   // Google SSO Modal State
   const [googleModalOpen, setGoogleModalOpen] = useState(false);
   const [googleCustomEmail, setGoogleCustomEmail] = useState('');
-  const [showOtherGoogleInput, setShowOtherGoogleInput] = useState(false);
   const [googleError, setGoogleError] = useState('');
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
@@ -86,10 +80,15 @@ export const AuthGatewayPage: React.FC<AuthGatewayPageProps> = ({
       return;
     }
 
+    if (!loginPassword.trim()) {
+      setErrorMsg('Por favor, informe a senha cadastrada na planilha externa do banco de dados.');
+      return;
+    }
+
     setIsSubmitting(true);
 
     setTimeout(() => {
-      const res = login(loginEmail);
+      const res = login(loginEmail, loginPassword);
       setIsSubmitting(false);
 
       if (!res.success) {
@@ -141,7 +140,7 @@ export const AuthGatewayPage: React.FC<AuthGatewayPageProps> = ({
     setIsSubmitting(true);
 
     setTimeout(() => {
-      const res = registerUser(regName, regEmail, regRole, regDepartment);
+      const res = registerUser(regName, regEmail, 'cliente', 'Colaborador Canção Nova', regPassword);
       setIsSubmitting(false);
 
       if (!res.success) {
@@ -156,7 +155,7 @@ export const AuthGatewayPage: React.FC<AuthGatewayPageProps> = ({
   };
 
   // Google Workspace SSO Authentication handler
-  const handleGoogleSignInAccount = (email: string, displayName?: string, role: UserRole = 'admin') => {
+  const handleGoogleSignInAccount = (email: string, displayName?: string) => {
     setGoogleError('');
     setIsGoogleLoading(true);
 
@@ -170,14 +169,24 @@ export const AuthGatewayPage: React.FC<AuthGatewayPageProps> = ({
     setTimeout(() => {
       const existing = users.find((u) => u.email.toLowerCase() === clean);
       if (existing) {
-        login(clean);
+        const res = login(clean, existing.password || '123');
+        if (!res.success) {
+          setIsGoogleLoading(false);
+          setGoogleError(res.message || 'Não foi possível autenticar este usuário.');
+          return;
+        }
       } else {
-        registerUser(
+        const res = registerUser(
           displayName || clean.split('@')[0].replace('.', ' ').replace(/\b\w/g, (l) => l.toUpperCase()),
           clean,
-          role,
-          'Nutrição & Refeitório Canção Nova'
+          'cliente',
+          'Colaborador Canção Nova'
         );
+        if (!res.success) {
+          setIsGoogleLoading(false);
+          setGoogleError(res.message || 'Erro ao cadastrar conta.');
+          return;
+        }
       }
       setIsGoogleLoading(false);
       setGoogleModalOpen(false);
@@ -207,25 +216,27 @@ export const AuthGatewayPage: React.FC<AuthGatewayPageProps> = ({
           </div>
         </div>
 
-        {/* Theme Toggle Button */}
-        <button
-          type="button"
-          onClick={toggleTheme}
-          title={theme === 'dark' ? 'Mudar para Tema Claro' : 'Mudar para Tema Escuro'}
-          className="p-2 rounded-xl text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors flex items-center gap-2 text-xs font-semibold cursor-pointer border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-2xs"
-        >
-          {theme === 'dark' ? (
-            <>
-              <Sun className="w-4 h-4 text-amber-400" />
-              <span className="hidden sm:inline">Tema Claro</span>
-            </>
-          ) : (
-            <>
-              <Moon className="w-4 h-4 text-neutral-600" />
-              <span className="hidden sm:inline">Tema Escuro</span>
-            </>
-          )}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Theme Toggle Button */}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Mudar para Tema Claro' : 'Mudar para Tema Escuro'}
+            className="p-2 rounded-xl text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition-colors flex items-center gap-2 text-xs font-semibold cursor-pointer border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-2xs"
+          >
+            {theme === 'dark' ? (
+              <>
+                <Sun className="w-4 h-4 text-amber-400" />
+                <span className="hidden sm:inline">Tema Claro</span>
+              </>
+            ) : (
+              <>
+                <Moon className="w-4 h-4 text-neutral-600" />
+                <span className="hidden sm:inline">Tema Escuro</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Main Unified Auth Card */}
@@ -565,99 +576,6 @@ export const AuthGatewayPage: React.FC<AuthGatewayPageProps> = ({
                     </div>
                   </div>
 
-                  {/* Sector / Department */}
-                  <div>
-                    <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-1.5">
-                      Setor de Atuação
-                    </label>
-                    <div className="relative">
-                      <Building className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <select
-                        value={regDepartment}
-                        onChange={(e) => setRegDepartment(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 text-xs sm:text-sm bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-xl focus:ring-2 focus:ring-amber-500 transition-colors cursor-pointer"
-                      >
-                        <option value="Nutrição & Cardápios">Nutrição & Cardápios</option>
-                        <option value="Cozinha Central & Produção">Cozinha Central & Produção</option>
-                        <option value="Hospitalidade & Refeitório Geral">Hospitalidade & Refeitório Geral</option>
-                        <option value="Eventos & Peregrinação">Eventos & Peregrinação</option>
-                        <option value="Administração & Suprimentos">Administração & Suprimentos</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Access Role Selection (Admin vs Read-only) */}
-                  {/* Access Role Selection (Master notice + Admin Secundário vs Cliente vs Leitor) */}
-                  <div>
-                    <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300 mb-1.5">
-                      Nível de Permissão Solicitado no Cadastro
-                    </label>
-
-                    {/* Master Info Note */}
-                    <div className="mb-2 p-2.5 rounded-xl bg-amber-100/70 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800 text-[11px] text-amber-900 dark:text-amber-200 flex items-center gap-2">
-                      <span className="text-base shrink-0">👑</span>
-                      <span>
-                        <strong>Administrador MASTER:</strong> Atribuído exclusivamente a <strong>wesley.moreira@comunidadecancaonova.com</strong> com controle pleno sobre todos os módulos e usuários.
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                      {/* Secondary Admin Choice */}
-                      <div
-                        onClick={() => setRegRole('admin')}
-                        className={`p-3 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
-                          regRole === 'admin'
-                            ? 'border-emerald-600 bg-emerald-50/70 dark:bg-emerald-950/40 text-neutral-900 dark:text-neutral-100 shadow-2xs'
-                            : 'border-neutral-200 dark:border-neutral-700/70 bg-neutral-50 dark:bg-neutral-800/40 hover:border-neutral-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <ShieldCheck className={`w-4 h-4 ${regRole === 'admin' ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-400'}`} />
-                          <span className="font-bold text-xs">Admin Secundário</span>
-                        </div>
-                        <p className="text-[10px] text-neutral-500 dark:text-neutral-400 leading-snug">
-                          Montar cardápios semanais, alterar pratos, calcular quantidades da cozinha e fichas técnicas.
-                        </p>
-                      </div>
-
-                      {/* Cliente Choice */}
-                      <div
-                        onClick={() => setRegRole('cliente')}
-                        className={`p-3 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
-                          regRole === 'cliente'
-                            ? 'border-sky-600 bg-sky-50/70 dark:bg-sky-950/40 text-neutral-900 dark:text-neutral-100 shadow-2xs'
-                            : 'border-neutral-200 dark:border-neutral-700/70 bg-neutral-50 dark:bg-neutral-800/40 hover:border-neutral-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <User className={`w-4 h-4 ${regRole === 'cliente' ? 'text-sky-600 dark:text-sky-400' : 'text-neutral-400'}`} />
-                          <span className="font-bold text-xs">Cliente (Rampa & Frutas)</span>
-                        </div>
-                        <p className="text-[10px] text-neutral-500 dark:text-neutral-400 leading-snug">
-                          <strong>Acesso exclusivo:</strong> Visualiza somente o Cardápio da Rampa, calcula por nº de pessoas e pede frutas.
-                        </p>
-                      </div>
-
-                      {/* Read-Only Choice */}
-                      <div
-                        onClick={() => setRegRole('leitor')}
-                        className={`p-3 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
-                          regRole === 'leitor'
-                            ? 'border-neutral-600 bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-2xs'
-                            : 'border-neutral-200 dark:border-neutral-700/70 bg-neutral-50 dark:bg-neutral-800/40 hover:border-neutral-300'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <Eye className={`w-4 h-4 ${regRole === 'leitor' ? 'text-neutral-700 dark:text-neutral-300' : 'text-neutral-400'}`} />
-                          <span className="font-bold text-xs">Apenas Leitura</span>
-                        </div>
-                        <p className="text-[10px] text-neutral-500 dark:text-neutral-400 leading-snug">
-                          Visualização e consulta dos cardápios semanais sem permissão para editar preparações.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
                   {/* Password & Confirmation */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
@@ -831,127 +749,40 @@ export const AuthGatewayPage: React.FC<AuthGatewayPageProps> = ({
                 </p>
               </div>
             ) : (
-              <div className="space-y-2.5">
-                
-                {/* Account 1: Wesley Moreira (Administrador MASTER) */}
-                <button
-                  type="button"
-                  onClick={() => handleGoogleSignInAccount('wesley.moreira@comunidadecancaonova.com', 'Wesley Moreira', 'master')}
-                  className="w-full p-3 rounded-2xl border-2 border-amber-400 dark:border-amber-700/80 bg-amber-50/60 dark:bg-amber-950/40 hover:bg-amber-100/70 dark:hover:bg-amber-900/50 transition-all flex items-center justify-between text-left cursor-pointer group shadow-2xs"
-                >
-                  <div className="flex items-center gap-3 truncate">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-amber-600 to-amber-700 text-white font-bold text-sm flex items-center justify-center shrink-0 shadow-xs ring-2 ring-amber-400/40">
-                      👑
-                    </div>
-                    <div className="truncate">
-                      <div className="flex items-center gap-2">
-                        <p className="text-xs font-bold text-neutral-900 dark:text-neutral-100 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors">
-                          Wesley Moreira
-                        </p>
-                        <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-200 dark:bg-amber-900 text-amber-950 dark:text-amber-200">
-                          MASTER
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-neutral-500 dark:text-neutral-400 font-mono truncate">
-                        wesley.moreira@comunidadecancaonova.com
-                      </p>
-                      <span className="text-[10px] text-amber-800 dark:text-amber-300 font-semibold block">
-                        Administrador MASTER · Controle Geral do Sistema
-                      </span>
-                    </div>
-                  </div>
-                  <ArrowRight className="w-4 h-4 text-amber-600 group-hover:translate-x-0.5 transition-all shrink-0 ml-2" />
-                </button>
-
-                {/* Other Accounts from System (Admin Secundário, Cliente, etc.) */}
-                {users.filter(u => u.email !== 'wesley.moreira@comunidadecancaonova.com').slice(0, 3).map((u) => (
-                  <button
-                    key={u.id}
-                    type="button"
-                    onClick={() => handleGoogleSignInAccount(u.email, u.name, u.role)}
-                    className="w-full p-3 rounded-2xl border border-neutral-200 dark:border-neutral-750 bg-neutral-50 dark:bg-neutral-800/80 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:border-amber-500 dark:hover:border-amber-500 transition-all flex items-center justify-between text-left cursor-pointer group"
-                  >
-                    <div className="flex items-center gap-3 truncate">
-                      <div className="w-10 h-10 rounded-full bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-200 font-bold text-sm flex items-center justify-center shrink-0">
-                        {u.role === 'admin' ? '🛡️' : u.role === 'cliente' ? '👤' : u.name.charAt(0)}
-                      </div>
-                      <div className="truncate">
-                        <div className="flex items-center gap-2">
-                          <p className="text-xs font-bold text-neutral-900 dark:text-neutral-100 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors">
-                            {u.name}
-                          </p>
-                          <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
-                            u.role === 'admin'
-                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                              : u.role === 'cliente'
-                              ? 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300'
-                              : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
-                          }`}>
-                            {u.role === 'admin' ? 'Admin Secundário' : u.role === 'cliente' ? 'Cliente' : 'Leitor'}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-neutral-500 dark:text-neutral-400 font-mono truncate">
-                          {u.email}
-                        </p>
-                        <span className="text-[10px] text-neutral-500 dark:text-neutral-400 block truncate">
-                          {u.role === 'admin'
-                            ? 'Edição de Cardápios & Cozinha'
-                            : u.role === 'cliente'
-                            ? 'Acesso Exclusivo: Cardápio Rampa & Frutas'
-                            : 'Consulta & Leitura'}
-                        </span>
-                      </div>
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-neutral-400 group-hover:text-amber-600 group-hover:translate-x-0.5 transition-all shrink-0 ml-2" />
-                  </button>
-                ))}
-
-                {/* Option: Use another Google account */}
-                <div className="pt-2">
-                  {!showOtherGoogleInput ? (
+              <div className="space-y-3">
+                <div className="p-4 bg-neutral-50 dark:bg-neutral-800/60 rounded-2xl border border-neutral-200 dark:border-neutral-700 space-y-3">
+                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                    E-mail Google Workspace Institucional:
+                  </label>
+                  <input
+                    type="email"
+                    value={googleCustomEmail}
+                    onChange={(e) => setGoogleCustomEmail(e.target.value)}
+                    placeholder="seu.nome@cancaonova.com"
+                    autoFocus
+                    className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-xl focus:ring-2 focus:ring-amber-500"
+                  />
+                  <div className="flex items-center gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={() => setShowOtherGoogleInput(true)}
-                      className="w-full py-2.5 px-3 rounded-xl border border-dashed border-neutral-300 dark:border-neutral-700 text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:text-amber-700 dark:hover:text-amber-400 hover:border-amber-500 text-center transition-colors cursor-pointer"
+                      onClick={() => handleGoogleSignInAccount(googleCustomEmail)}
+                      className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
                     >
-                      + Usar outra conta Google institucional (@cancaonova.com)
+                      Continuar com Google Workspace
                     </button>
-                  ) : (
-                    <div className="p-3 bg-neutral-50 dark:bg-neutral-800/60 rounded-2xl border border-neutral-200 dark:border-neutral-700 space-y-2.5">
-                      <label className="block text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
-                        Digite seu e-mail Google Workspace:
-                      </label>
-                      <input
-                        type="email"
-                        value={googleCustomEmail}
-                        onChange={(e) => setGoogleCustomEmail(e.target.value)}
-                        placeholder="nome@cancaonova.com"
-                        className="w-full px-3 py-2 text-xs bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-700 rounded-xl focus:ring-2 focus:ring-amber-500"
-                      />
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleGoogleSignInAccount(googleCustomEmail)}
-                          className="flex-1 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
-                        >
-                          Continuar com esta conta
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowOtherGoogleInput(false);
-                            setGoogleCustomEmail('');
-                            setGoogleError('');
-                          }}
-                          className="py-2 px-3 text-xs text-neutral-500 hover:text-neutral-700 cursor-pointer"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGoogleCustomEmail('');
+                        setGoogleError('');
+                        setGoogleModalOpen(false);
+                      }}
+                      className="py-2.5 px-3 text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200 cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
                 </div>
-
               </div>
             )}
 

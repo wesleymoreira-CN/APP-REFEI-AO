@@ -142,7 +142,7 @@ function MainLayout() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-neutral-100 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 font-sans transition-colors">
+    <div className="min-h-screen flex flex-col bg-neutral-100 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 font-sans transition-colors w-full max-w-full overflow-x-hidden">
       {/* Top Navbar */}
       <div className="no-print">
         <Navbar

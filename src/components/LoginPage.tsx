@@ -12,14 +12,10 @@ import {
   ArrowRight, 
   CheckCircle2, 
   AlertCircle, 
-  Sparkles, 
   ChefHat, 
   Scale, 
   Tag, 
-  Calendar,
-  LogOut,
-  UserCheck,
-  ShieldAlert
+  LogOut
 } from 'lucide-react';
 import { isValidCancaoNovaEmail } from '../utils/validators';
 
@@ -32,7 +28,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   onLoginSuccess,
   onContinueAsGuest 
 }) => {
-  const { login, logout, currentUser, users, switchUser } = useApp();
+  const { login, logout, currentUser } = useApp();
   
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -59,10 +55,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       return;
     }
 
+    if (!password.trim()) {
+      setErrorMsg('Por favor, informe a sua senha institucional.');
+      return;
+    }
+
     setIsSubmitting(true);
 
     setTimeout(() => {
-      const res = login(email);
+      const res = login(email, password);
       setIsSubmitting(false);
 
       if (!res.success) {
@@ -76,17 +77,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         }, 600);
       }
     }, 400);
-  };
-
-  const handleQuickLogin = (userId: string) => {
-    switchUser(userId);
-    const targetUser = users.find((u) => u.id === userId);
-    setSuccessMsg(`Conectado com sucesso como ${targetUser?.name || 'usuário'}!`);
-    setTimeout(() => {
-      if (onLoginSuccess) {
-        onLoginSuccess();
-      }
-    }, 500);
   };
 
   return (
@@ -316,100 +306,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 </div>
               )}
 
-              {/* Official Sign in with Google Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  login('wesley.moreira@comunidadecancaonova.com');
-                  setSuccessMsg('Conectado via Conta Google Workspace (Wesley Moreira - MASTER)!');
-                  setTimeout(() => {
-                    if (onLoginSuccess) onLoginSuccess();
-                  }, 500);
-                }}
-                className="w-full py-3 px-4 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-750 text-neutral-800 dark:text-neutral-100 font-bold text-xs sm:text-sm rounded-xl border border-neutral-300 dark:border-neutral-700 shadow-2xs hover:shadow-sm transition-all flex items-center justify-center gap-3 cursor-pointer group"
-              >
-                <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                </svg>
-                <span className="group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors">
-                  Entrar com Conta Google (Wesley Moreira - MASTER)
-                </span>
-              </button>
-
-              {/* Quick Profile Selectors (Master, Admin Secundário, Cliente) */}
-              <div className="space-y-2">
-                <p className="text-[11px] font-bold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
-                  Acesso Rápido por Perfil do Sistema:
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  {/* Master Button */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      login('wesley.moreira@comunidadecancaonova.com');
-                      setSuccessMsg('Conectado como Administrador MASTER!');
-                      setTimeout(() => { if (onLoginSuccess) onLoginSuccess(); }, 400);
-                    }}
-                    className="p-2.5 rounded-xl border-2 border-amber-400 dark:border-amber-700 bg-amber-50/70 dark:bg-amber-950/40 text-left hover:bg-amber-100 transition-all cursor-pointer group shadow-2xs"
-                  >
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <span className="text-sm">👑</span>
-                      <strong className="text-xs text-amber-950 dark:text-amber-200">Admin MASTER</strong>
-                    </div>
-                    <p className="text-[10px] text-amber-800 dark:text-amber-300 font-medium truncate">Wesley Moreira</p>
-                    <span className="text-[9px] text-amber-700/80 dark:text-amber-400 block font-mono truncate">@comunidadecancaonova.com</span>
-                  </button>
-
-                  {/* Admin Secundário Button */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      login('maria.silva@cancaonova.com');
-                      setSuccessMsg('Conectado como Administrador Secundário!');
-                      setTimeout(() => { if (onLoginSuccess) onLoginSuccess(); }, 400);
-                    }}
-                    className="p-2.5 rounded-xl border-2 border-emerald-400 dark:border-emerald-750 bg-emerald-50/70 dark:bg-emerald-950/40 text-left hover:bg-emerald-100 transition-all cursor-pointer group shadow-2xs"
-                  >
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                      <strong className="text-xs text-emerald-950 dark:text-emerald-200">Admin Secundário</strong>
-                    </div>
-                    <p className="text-[10px] text-emerald-800 dark:text-emerald-300 font-medium truncate">Maria Cecília</p>
-                    <span className="text-[9px] text-emerald-700/80 dark:text-emerald-400 block font-mono truncate">Nutrição & Cardápios</span>
-                  </button>
-
-                  {/* Cliente Button */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      login('eventos.retiros@cancaonova.com');
-                      setSuccessMsg('Conectado como Cliente (Rampa & Frutas)!');
-                      setTimeout(() => { if (onLoginSuccess) onLoginSuccess(); }, 400);
-                    }}
-                    className="p-2.5 rounded-xl border-2 border-sky-400 dark:border-sky-750 bg-sky-50/70 dark:bg-sky-950/40 text-left hover:bg-sky-100 transition-all cursor-pointer group shadow-2xs"
-                  >
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <span className="text-sm">👤</span>
-                      <strong className="text-xs text-sky-950 dark:text-sky-200">Cliente (Rampa)</strong>
-                    </div>
-                    <p className="text-[10px] text-sky-800 dark:text-sky-300 font-medium truncate">Lucas Ferreira</p>
-                    <span className="text-[9px] text-sky-700/80 dark:text-sky-400 block font-mono truncate">Exclusivo: Rampa & Frutas</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Divider */}
-              <div className="relative flex items-center justify-center my-3">
-                <div className="border-t border-neutral-200 dark:border-neutral-700/80 w-full"></div>
-                <span className="bg-white dark:bg-neutral-900 px-3 text-[10px] uppercase tracking-wider text-neutral-400 font-bold shrink-0">
-                  ou acesse com e-mail corporativo
-                </span>
-                <div className="border-t border-neutral-200 dark:border-neutral-700/80 w-full"></div>
-              </div>
-
               {/* Form */}
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
@@ -424,7 +320,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                         setEmail(e.target.value);
                         if (errorMsg) setErrorMsg('');
                       }}
-                      placeholder="ex: wesley.moreira@comunidadecancaonova.com"
+                      placeholder="seu.nome@cancaonova.com"
                       className="w-full pl-10 pr-4 py-2.5 text-xs bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 border border-neutral-300 dark:border-neutral-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono shadow-2xs"
                       autoFocus
                     />
@@ -438,7 +334,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                       Senha Corporativa
                     </label>
                     <span className="text-[11px] text-neutral-400">
-                      (validação simplificada de demonstração)
+                      Mínimo 4 caracteres
                     </span>
                   </div>
                   <div className="relative">
@@ -500,8 +396,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               )}
             </div>
           )}
-
-
 
         </div>
 

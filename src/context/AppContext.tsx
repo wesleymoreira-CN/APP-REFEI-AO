@@ -33,6 +33,20 @@ import {
   sheetToTsv 
 } from '../utils/spreadsheetEngine';
 import { BlockedDishModal } from '../components/BlockedDishModal';
+import {
+  EXTERNAL_SHEET_URL_STORAGE_KEY,
+  LAST_SYNC_STORAGE_KEY,
+  APPS_SCRIPT_URL_STORAGE_KEY,
+  AUTO_SYNC_APPS_SCRIPT_KEY,
+  LAST_APPS_SCRIPT_SYNC_KEY,
+  getLoadedExternalUsers,
+  syncUsersFromExternalSheet,
+  authenticateUserWithSheet,
+  fetchUsersViaAppsScript,
+  pushFullSyncToAppsScript,
+  pushSingleOrderToAppsScript,
+  pushSingleUserToAppsScript,
+} from '../services/externalDatabaseService';
 
 interface AppContextType {
   currentUser: User | null;
@@ -43,6 +57,19 @@ interface AppContextType {
   setMenuType: (t: MenuType) => void;
   theme: 'light' | 'dark';
   setTheme: (t: 'light' | 'dark') => void;
+  // External Google Sheets Database & Apps Script
+  externalSheetUrl: string;
+  setExternalSheetUrl: (url: string) => void;
+  syncExternalDatabase: (customUrl?: string) => Promise<{ success: boolean; message: string; count: number }>;
+  isSyncingDatabase: boolean;
+  lastDatabaseSync: string | null;
+  appsScriptUrl: string;
+  setAppsScriptUrl: (url: string) => void;
+  autoSyncAppsScript: boolean;
+  setAutoSyncAppsScript: (enabled: boolean) => void;
+  lastAppsScriptSync: string | null;
+  pullUsersFromAppsScript: (customUrl?: string) => Promise<{ success: boolean; message: string; count: number }>;
+  syncAllWithAppsScript: (customUrl?: string) => Promise<{ success: boolean; message: string }>;
   toggleTheme: () => void;
   selectedYear: number;
   setSelectedYear: (y: number) => void;
@@ -62,8 +89,8 @@ interface AppContextType {
   blockedDishInfo: { dishName: string; reason?: string; conflict?: RepetitionConflict } | null;
   setBlockedDishInfo: (info: { dishName: string; reason?: string; conflict?: RepetitionConflict } | null) => void;
   checkDishAvailability: (dishName: string, category: keyof MealSlot, dayKey: string) => { allowed: boolean; reason?: string; conflict?: RepetitionConflict };
-  login: (email: string) => { success: boolean; message?: string };
-  registerUser: (name: string, email: string, role: UserRole, department?: string) => { success: boolean; message?: string };
+  login: (email: string, password?: string) => { success: boolean; message?: string };
+  registerUser: (name: string, email: string, role: UserRole, department?: string, password?: string) => { success: boolean; message?: string };
   logout: () => void;
   switchUser: (userId: string) => void;
   addUser: (name: string, email: string, role: UserRole, department?: string) => { success: boolean; message?: string };
@@ -175,11 +202,163 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     conflict?: RepetitionConflict;
   } | null>(null);
 
-  // Initial State from localStorage or fallbacks
+  // External Google Sheet & Apps Script URLs
+  const [externalSheetUrl, setExternalSheetUrlState] = useState<string>(() => {
+    try {
+      return localStorage.getItem(EXTERNAL_SHEET_URL_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
+  });
+
+  const [appsScriptUrl, setAppsScriptUrlState] = useState<string>(() => {
+    try {
+      return localStorage.getItem(APPS_SCRIPT_URL_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
+  });
+
+  const [autoSyncAppsScript, setAutoSyncAppsScriptState] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(AUTO_SYNC_APPS_SCRIPT_KEY);
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
+
+  const [isSyncingDatabase, setIsSyncingDatabase] = useState(false);
+  const [lastDatabaseSync, setLastDatabaseSync] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(LAST_SYNC_STORAGE_KEY) || null;
+    } catch {
+      return null;
+    }
+  });
+  const [lastAppsScriptSync, setLastAppsScriptSync] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(LAST_APPS_SCRIPT_SYNC_KEY) || null;
+    } catch {
+      return null;
+    }
+  });
+
+  const setExternalSheetUrl = (url: string) => {
+    setExternalSheetUrlState(url);
+    try {
+      localStorage.setItem(EXTERNAL_SHEET_URL_STORAGE_KEY, url);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const setAppsScriptUrl = (url: string) => {
+    setAppsScriptUrlState(url);
+    try {
+      localStorage.setItem(APPS_SCRIPT_URL_STORAGE_KEY, url);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const setAutoSyncAppsScript = (enabled: boolean) => {
+    setAutoSyncAppsScriptState(enabled);
+    try {
+      localStorage.setItem(AUTO_SYNC_APPS_SCRIPT_KEY, String(enabled));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const syncExternalDatabase = async (customUrl?: string) => {
+    const urlToUse = customUrl !== undefined ? customUrl : externalSheetUrl;
+    setIsSyncingDatabase(true);
+    try {
+      const result = await syncUsersFromExternalSheet(urlToUse);
+      if (result.success && result.users.length > 0) {
+        setUsers(result.users);
+        try {
+          localStorage.setItem(STORAGE_USERS, JSON.stringify(result.users));
+        } catch (e) {
+          console.error(e);
+        }
+        setLastDatabaseSync(new Date().toISOString());
+      }
+      return result;
+    } finally {
+      setIsSyncingDatabase(false);
+    }
+  };
+
+  const pullUsersFromAppsScript = async (customUrl?: string) => {
+    const urlToUse = customUrl !== undefined ? customUrl : appsScriptUrl;
+    setIsSyncingDatabase(true);
+    try {
+      const result = await fetchUsersViaAppsScript(urlToUse);
+      if (result.success && result.users.length > 0) {
+        setUsers(result.users);
+        try {
+          localStorage.setItem(STORAGE_USERS, JSON.stringify(result.users));
+        } catch (e) {
+          console.error(e);
+        }
+        const now = new Date().toISOString();
+        setLastDatabaseSync(now);
+        setLastAppsScriptSync(now);
+      }
+      return result;
+    } finally {
+      setIsSyncingDatabase(false);
+    }
+  };
+
+  const syncAllWithAppsScript = async (customUrl?: string) => {
+    const urlToUse = customUrl !== undefined ? customUrl : appsScriptUrl;
+    setIsSyncingDatabase(true);
+    try {
+      const pushRes = await pushFullSyncToAppsScript(urlToUse, {
+        users,
+        orders: clientOrders,
+        spreadsheet,
+      });
+      if (!pushRes.success) {
+        return pushRes;
+      }
+
+      // After pushing, pull latest users from the spreadsheet so edits made in Google Sheets reflect immediately
+      const pullRes = await fetchUsersViaAppsScript(urlToUse);
+      if (pullRes.success && pullRes.users.length > 0) {
+        setUsers(pullRes.users);
+        try {
+          localStorage.setItem(STORAGE_USERS, JSON.stringify(pullRes.users));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      const now = new Date().toISOString();
+      setLastAppsScriptSync(now);
+      setLastDatabaseSync(now);
+      logAudit(
+        'Sincronização Apps Script',
+        'Google Sheets',
+        `Dados enviados e sincronizados com a planilha "${pushRes.sheetName || 'Google Sheets'}".`
+      );
+      return {
+        success: true,
+        message: `${pushRes.message}${pullRes.success ? ` (${pullRes.count} usuários atualizados)` : ''}`,
+      };
+    } finally {
+      setIsSyncingDatabase(false);
+    }
+  };
+
+  // Initial State from localStorage or external database cache
   const [users, setUsers] = useState<User[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_USERS);
-      const loaded: User[] = saved ? JSON.parse(saved) : INITIAL_USERS;
+      const loaded: User[] = saved ? JSON.parse(saved) : getLoadedExternalUsers();
       // Guarantee that wesley.moreira is always Master Admin
       return loaded.map((u) => {
         if (u.email.toLowerCase() === 'wesley.moreira@comunidadecancaonova.com') {
@@ -188,7 +367,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return u;
       });
     } catch {
-      return INITIAL_USERS;
+      return getLoadedExternalUsers();
     }
   });
 
@@ -418,42 +597,80 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return validateDishAddition(dishName, category, dayKey, currentMenu, menus, menuType);
   };
 
-  // Auth & User operations
-  const login = (email: string) => {
+  // Auth & User operations: Validates domain, database existence, and password
+  const login = (email: string, password?: string) => {
     const clean = email.trim().toLowerCase();
+
+    // 1. Mandatory Domain Validation
     if (!isValidCancaoNovaEmail(clean)) {
       return {
         success: false,
-        message: 'Acesso restrito: somente endereços de e-mail institucionais com o domínio @cancaonova.com ou @comunidadecancaonova.com são autorizados.',
+        message: 'Acesso restrito: Somente e-mails corporativos com o domínio @cancaonova.com ou @comunidadecancaonova.com são autorizados a entrar no sistema.',
       };
     }
 
-    const found = users.find((u) => u.email.toLowerCase() === clean);
-    if (found) {
-      const assignedRole: UserRole = clean === 'wesley.moreira@comunidadecancaonova.com' ? 'master' : found.role;
-      const updatedUser: User = {
-        ...found,
-        role: assignedRole,
-        lastLogin: new Date().toISOString(),
-      };
+    // 2. If password is provided, validate strictly against database credentials
+    if (password !== undefined && password !== '') {
+      const authRes = authenticateUserWithSheet(clean, password, users);
+      if (!authRes.success || !authRes.user) {
+        return {
+          success: false,
+          message: authRes.message || 'Falha na autenticação.',
+        };
+      }
+
       try {
         localStorage.removeItem('cardapiopro_logged_out_v3');
-        localStorage.setItem(STORAGE_CURRENT_USER, JSON.stringify(updatedUser));
+        localStorage.setItem(STORAGE_CURRENT_USER, JSON.stringify(authRes.user));
       } catch (e) {
         console.error(e);
       }
-      setCurrentUser(updatedUser);
-      setUsers((prev) => prev.map((u) => (u.id === found.id ? updatedUser : u)));
+      setCurrentUser(authRes.user);
+      setUsers((prev) => prev.map((u) => (u.id === authRes.user!.id ? authRes.user! : u)));
       return { success: true };
     }
 
-    return {
-      success: false,
-      message: 'Usuário não cadastrado com este e-mail. Por favor, crie seu acesso na aba "Cadastrar Usuário".',
+    // 3. If password was not entered, check if user exists and if password is required
+    const found = users.find((u) => u.email.toLowerCase() === clean);
+    if (!found) {
+      return {
+        success: false,
+        message: `O e-mail "${clean}" não consta na planilha do banco de dados de usuários cadastrados. Solicite ao Administrador MASTER que adicione seu e-mail e senha na planilha externa.`,
+      };
+    }
+
+    if (found.active === false) {
+      return {
+        success: false,
+        message: `O acesso para o e-mail "${clean}" está marcado como DESATIVADO na planilha de controle de usuários.`,
+      };
+    }
+
+    if (found.password && found.password.trim() !== '') {
+      return {
+        success: false,
+        message: 'Por favor, digite a senha cadastrada na planilha externa para autenticar este usuário.',
+      };
+    }
+
+    const assignedRole: UserRole = clean === 'wesley.moreira@comunidadecancaonova.com' ? 'master' : found.role;
+    const updatedUser: User = {
+      ...found,
+      role: assignedRole,
+      lastLogin: new Date().toISOString(),
     };
+    try {
+      localStorage.removeItem('cardapiopro_logged_out_v3');
+      localStorage.setItem(STORAGE_CURRENT_USER, JSON.stringify(updatedUser));
+    } catch (e) {
+      console.error(e);
+    }
+    setCurrentUser(updatedUser);
+    setUsers((prev) => prev.map((u) => (u.id === found.id ? updatedUser : u)));
+    return { success: true };
   };
 
-  const registerUser = (name: string, email: string, role: UserRole, department?: string) => {
+  const registerUser = (name: string, email: string, role: UserRole, department?: string, password?: string) => {
     const clean = email.trim().toLowerCase();
     if (!name.trim()) {
       return {
@@ -483,8 +700,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       id: `user-${Date.now()}`,
       name: name.trim(),
       email: clean,
+      password: password?.trim() || '123',
+      active: true,
       role: assignedRole,
       department: department?.trim() || defaultDept,
+      source: 'local',
       createdAt: new Date().toISOString(),
       lastLogin: new Date().toISOString(),
     };
@@ -497,6 +717,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     setUsers((prev) => [...prev, newUser]);
     setCurrentUser(newUser);
+    if (appsScriptUrl && autoSyncAppsScript) {
+      void pushSingleUserToAppsScript(appsScriptUrl, newUser);
+    }
     return { success: true };
   };
 
@@ -554,6 +777,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     setUsers((prev) => [...prev, newUser]);
+    if (appsScriptUrl && autoSyncAppsScript) {
+      void pushSingleUserToAppsScript(appsScriptUrl, { ...newUser, password: '123', active: true });
+    }
     logAudit(
       'Cadastro de Usuário',
       'Usuários & Permissões',
@@ -650,13 +876,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       'Área do Cliente',
       `Pedido "${newOrder.orderNumber}" criado por "${newOrder.clientName}" para ${newOrder.numberOfPeople} pessoas com ${newOrder.fruits.length} tipos de frutas.`
     );
+    if (appsScriptUrl && autoSyncAppsScript) {
+      void pushSingleOrderToAppsScript(appsScriptUrl, newOrder);
+    }
     return newOrder;
   };
 
   const updateClientOrderStatus = (orderId: string, status: ClientRampaOrder['status']) => {
-    setClientOrders((prev) =>
-      prev.map((o) => (o.id === orderId ? { ...o, status } : o))
-    );
+    setClientOrders((prev) => {
+      const updated = prev.map((o) => (o.id === orderId ? { ...o, status } : o));
+      const changedOrder = updated.find((o) => o.id === orderId);
+      if (changedOrder && appsScriptUrl && autoSyncAppsScript) {
+        void pushSingleOrderToAppsScript(appsScriptUrl, changedOrder);
+      }
+      return updated;
+    });
     logAudit(
       'Status de Pedido Alterado',
       'Área do Cliente',
@@ -1269,6 +1503,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addClientOrder,
         updateClientOrderStatus,
         deleteClientOrder,
+        // External Google Sheets Database & Apps Script
+        externalSheetUrl,
+        setExternalSheetUrl,
+        syncExternalDatabase,
+        isSyncingDatabase,
+        lastDatabaseSync,
+        appsScriptUrl,
+        setAppsScriptUrl,
+        autoSyncAppsScript,
+        setAutoSyncAppsScript,
+        lastAppsScriptSync,
+        pullUsersFromAppsScript,
+        syncAllWithAppsScript,
       }}
     >
       {/* Global Blocked Dish Modal Alert */}

@@ -15,8 +15,10 @@ import {
   Mail,
   LogIn,
   LogOut,
-  ArrowRight
+  ArrowRight,
+  FileSpreadsheet
 } from 'lucide-react';
+import { GoogleSheetsDatabaseModal } from './GoogleSheetsDatabaseModal';
 
 interface UserManagementModalProps {
   isOpen: boolean;
@@ -33,6 +35,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
   const [department, setDepartment] = useState('Nutrição e Cozinha');
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [sheetsModalOpen, setSheetsModalOpen] = useState(false);
 
   if (!isOpen) return null;
 
@@ -111,6 +114,31 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
               <span className="font-mono font-bold text-amber-950 dark:text-amber-300">@cancaonova.com</span>. Cada colaborador pode ser configurado como{' '}
               <strong>Administrador</strong> (acesso completo de edição) ou <strong>Apenas Leitura</strong> (visualização e impressão).
             </div>
+          </div>
+
+          {/* External Google Sheets Database Banner & Trigger */}
+          <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                <FileSpreadsheet className="w-5 h-5" />
+              </div>
+              <div>
+                <strong className="text-emerald-950 dark:text-emerald-200 text-sm block font-bold">
+                  Banco de Dados em Planilha Google Sheets
+                </strong>
+                <p className="text-emerald-800 dark:text-emerald-300 text-xs mt-0.5">
+                  Conecte uma planilha externa fora do app para controlar usuários, setores e senhas de login com domínio @cancaonova.com.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSheetsModalOpen(true)}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shrink-0 shadow-2xs flex items-center justify-center gap-2"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Conectar / Sincronizar Planilha</span>
+            </button>
           </div>
 
           {/* Add User Form (Admin only) */}
@@ -413,6 +441,11 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({ isOpen
           </div>
         </div>
       </div>
+
+      <GoogleSheetsDatabaseModal
+        isOpen={sheetsModalOpen}
+        onClose={() => setSheetsModalOpen(false)}
+      />
     </div>
   );
 };

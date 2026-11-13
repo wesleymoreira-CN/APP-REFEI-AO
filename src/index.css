@@ -12,6 +12,42 @@
   }
 }
 
+/* Clean, visible horizontal and vertical scrollbars for stacked navigation bars and lists */
+.custom-scrollbar-x {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(217, 119, 6, 0.55) rgba(115, 115, 115, 0.12);
+}
+.custom-scrollbar-x::-webkit-scrollbar {
+  height: 7px;
+}
+.custom-scrollbar-x::-webkit-scrollbar-track {
+  background: rgba(115, 115, 115, 0.12);
+  border-radius: 9999px;
+}
+.custom-scrollbar-x::-webkit-scrollbar-thumb {
+  background: rgba(217, 119, 6, 0.55);
+  border-radius: 9999px;
+}
+.custom-scrollbar-x::-webkit-scrollbar-thumb:hover {
+  background: rgba(217, 119, 6, 0.85);
+}
+
+.custom-scrollbar-y {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(217, 119, 6, 0.55) rgba(115, 115, 115, 0.12);
+}
+.custom-scrollbar-y::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar-y::-webkit-scrollbar-track {
+  background: rgba(115, 115, 115, 0.12);
+  border-radius: 9999px;
+}
+.custom-scrollbar-y::-webkit-scrollbar-thumb {
+  background: rgba(217, 119, 6, 0.55);
+  border-radius: 9999px;
+}
+
 @media screen {
   .print-only {
     display: none !important;

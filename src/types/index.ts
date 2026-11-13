@@ -44,9 +44,12 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  password?: string;
   role: UserRole;
   department?: string;
   avatar?: string;
+  active?: boolean;
+  source?: 'sheets' | 'apps_script' | 'local';
   createdAt: string;
   lastLogin?: string;
 }
